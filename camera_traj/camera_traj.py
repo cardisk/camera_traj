@@ -38,7 +38,6 @@ class MapPoint:
         fx = camera_info.k[0]
         cx = camera_info.k[2]
 
-        # Proiezione inversa sull'asse X ottico (destra/sinistra)
         # Inverse projection
         x_opt = (u - cx) * distance / fx
         z_opt = distance
@@ -80,12 +79,19 @@ class RollingMap:
 
 
 class CameraTraj(Node):
+    """
+    ROS2 node that calculates the trajectory from the
+    camera frames received
+    """
+
     def __init__(self):
         super().__init__("CameraTraj")
 
+        # Class fields
         self.bridge = CvBridge()
         self.camera_info = None
 
+        # ROS2 launch parameters
         self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("yolo_topic", "/cone_detection/output")
         self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
@@ -94,7 +100,7 @@ class CameraTraj(Node):
         self.rmsth = self.get_parameter("rolling_map_safety_threshold").double_value
 
         self.declare_parameter("rolling_map_ema_filter_alpha", 0.6)
-        self.rmsth = self.get_parameter("rolling_map_ema_filter_alpha").double_value
+        self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").double_value
 
         self.depth_topic = (
             self.get_parameter("depth_topic").get_parameter_value().string_value
@@ -106,12 +112,15 @@ class CameraTraj(Node):
             self.get_parameter("camera_info_topic").get_parameter_value().string_value
         )
 
-        self.cone_map = RollingMap(self.rmsth)
+        # RollingMap initialization
+        self.cone_map = RollingMap(self.rmsth, self.rmefa)
 
+        # Camera intrinsics subscriber to take camera information
         self.info_sub = self.create_subscription(
             CameraInfo, self.camera_info_topic, self.info_callback, 10
         )
 
+        # Synchronization of YOLO and Depth messages
         self.depth_sub = Subscriber(self, Image, self.depth_topic)
         self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic)
 
@@ -135,6 +144,7 @@ class CameraTraj(Node):
         if self.camera_info is None:
             return
 
+        # Transforming the ROS2 message into usable data
         try:
             depth_array = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="32FC1")
 
@@ -142,6 +152,7 @@ class CameraTraj(Node):
             self.get_logger().error(f"Failed to convert depth image: {e}")
             return
 
+        # Camera frame shape
         height, width = depth_array.shape
 
         for det in yolo_msg:
@@ -150,6 +161,7 @@ class CameraTraj(Node):
             xmin, ymin = det["BB"][0]
             xmax, ymax = det["BB"][1]
 
+            # Clamping the BB if at the image borders
             xmin = max(0, int(xmin))
             ymin = max(0, int(ymin))
             xmax = min(width, int(xmax))
@@ -159,6 +171,7 @@ class CameraTraj(Node):
                 self.get_logger().warn(f"Invalid bounding box for {object_class}")
                 continue
 
+            # BB size
             w = xmax - xmin
             h = ymax - ymin
 
@@ -166,6 +179,7 @@ class CameraTraj(Node):
                 self.get_logger().warn(f"Bounding box too small for {object_class}")
                 continue
 
+            # BB resizing
             patch_xmin = int(xmin + (w * 0.35))
             patch_xmax = int(xmax - (w * 0.35))
             patch_ymin = int(ymin + (h * 0.80))
@@ -176,16 +190,20 @@ class CameraTraj(Node):
             patch_ymin = max(0, min(patch_ymin, height - 1))
             patch_ymax = max(patch_ymin + 1, min(patch_ymax, height))
 
+            # Using the BB as a mask over the depth
             depth_roi = depth_array[patch_ymin:patch_ymax, patch_xmin:patch_xmax]
             valid_depths = depth_roi[
                 ~np.isnan(depth_roi) & ~np.isinf(depth_roi) & (depth_roi > 0.0)
             ]
 
             if valid_depths.size > 0:
+                # Using the percentiles to extract depth information
+                # 25% is more ore less the correct value estimation
                 distance = float(np.percentile(valid_depths, 25))
 
-                u_pixel = int((xmin + xmax) / 2)
-                v_pixel = int(ymax)
+                # Bottom center point inside the resiczed BB
+                u_pixel = int((patch_xmin + patch_xmax) / 2)
+                v_pixel = int(patch_ymax)
 
                 new_map_point = MapPoint.from_camera_point(
                     u=u_pixel,
@@ -196,6 +214,7 @@ class CameraTraj(Node):
                 )
 
                 self.cone_map.add_to_map(new_map_point)
+
                 self.get_logger().info(
                     f"Added {object_class} to Map at X: {new_map_point.x:.2f}, Y: {new_map_point.y:.2f}"
                 )
