@@ -2,12 +2,19 @@ import math
 from dataclasses import dataclass
 
 import numpy as np
-import rclpy
 from cv_bridge import CvBridge
-from driverless_msgs.msg import BoundingBoxes
-from message_filters import ApproximateTimeSynchronizer, Subscriber
+
+import rclpy
 from rclpy.node import Node
+
+from message_filters import ApproximateTimeSynchronizer, Subscriber
+
+from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import CameraInfo, Image
+from driverless_msgs.msg import BoundingBoxes
+
+from tf2_geometry_msgs import do_transform_point
+from tf2_ros import Buffer, TransformListener
 
 
 @dataclass
@@ -26,33 +33,14 @@ class MapPoint:
     color: str
     hit_count: int = 1
 
-    @classmethod
-    def from_camera_point(
-        cls, u: int, v: int, distance: float, camera_info, color: str
-    ):
-        """
-        Optical frame has Z in front, X at right and Y down
-        """
-
-        # Camera intrinsics K matrix parameters
-        fx = camera_info.k[0]
-        cx = camera_info.k[2]
-
-        # Inverse projection
-        x_opt = (u - cx) * distance / fx
-        z_opt = distance
-
-        map_x = z_opt
-        map_y = x_opt
-
-        return cls(x=map_x, y=map_y, color=color, hit_count=1)
-
 
 class RollingMap:
-    def __init__(self, rmsth, efa):
+    def __init__(self, rmsth, efa, rmcb, rmcm):
         self.safety_threshold: float = rmsth
         self.cone_map: list[MapPoint] = []
         self.ema_filter_alpha = efa
+        self.cull_behind_th = rmcb
+        self.cull_max_th = rmcm
 
     def add_to_map(self, new_point: MapPoint):
         best_dist = float("inf")
@@ -77,6 +65,33 @@ class RollingMap:
         else:
             self.cone_map.append(new_point)
 
+    def cull_map(self, transform_to_car, world_frame):
+        """
+        Remove the cones too far behind the car
+
+        transform_to_car: world_frame to camera_frame
+        """
+        kept_cones = []
+
+        for cone in self.cone_map:
+            # Crafting a ROS2 message to the transformation
+            p_odom = PointStamped()
+            # Here there is no need to use the complete header to do the transformation
+            p_odom.header.frame_id = world_frame
+            p_odom.point.x = cone.x
+            p_odom.point.y = cone.y
+            p_odom.point.z = 0.0
+
+            p_car = do_transform_point(p_odom, transform_to_car)
+
+            # Culling the cones
+            total_distance = math.hypot(p_car.point.x, p_car.point.y)
+
+            if p_car.point.x > self.cull_behind_th and total_distance < self.cull_max_th:
+                kept_cones.append(cone)
+
+        self.cone_map = kept_cones
+
 
 class CameraTraj(Node):
     """
@@ -91,29 +106,49 @@ class CameraTraj(Node):
         self.bridge = CvBridge()
         self.camera_info = None
 
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self)
+
         # ROS2 launch parameters
         self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("yolo_topic", "/cone_detection/output")
         self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
-
         self.declare_parameter("rolling_map_safety_threshold", 0.5)
-        self.rmsth = self.get_parameter("rolling_map_safety_threshold").double_value
-
         self.declare_parameter("rolling_map_ema_filter_alpha", 0.6)
+        self.declare_parameter("world_frame", "odom")
+        self.declare_parameter("car_frame", "base_link")
+        self.declare_parameter("cull_distance_behind", -2.0)
+        self.declare_parameter("cull_distance_max", 10.0)
+
+        self.rmsth = self.get_parameter("rolling_map_safety_threshold").double_value
         self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").double_value
+        self.rmcb = self.get_parameter("cull_distance_behind").double_value
+        self.rmcm = self.get_parameter("cull_distance_max").double_value
 
         self.depth_topic = (
             self.get_parameter("depth_topic").get_parameter_value().string_value
         )
+
         self.yolo_topic = (
             self.get_parameter("yolo_topic").get_parameter_value().string_value
         )
+
         self.camera_info_topic = (
             self.get_parameter("camera_info_topic").get_parameter_value().string_value
         )
 
+        self.car_frame = self.get_parameter("car_frame").get_parameter_value().string_value
+        self.world_frame = (
+            self.get_parameter("world_frame").get_parameter_value().string_value
+        )
+
         # RollingMap initialization
-        self.cone_map = RollingMap(self.rmsth, self.rmefa)
+        self.cone_map = RollingMap(
+            self.rmsth,
+            self.rmefa,
+            self.rmcb,
+            self.rmcm
+        )
 
         # Camera intrinsics subscriber to take camera information
         self.info_sub = self.create_subscription(
@@ -202,26 +237,81 @@ class CameraTraj(Node):
                 distance = float(np.percentile(valid_depths, 25))
 
                 # Bottom center point inside the resiczed BB
-                u_pixel = int((patch_xmin + patch_xmax) / 2)
-                v_pixel = int(patch_ymax)
+                u_pixel = int((xmin + xmax) / 2)
+                v_pixel = int(ymax)
 
-                new_map_point = MapPoint.from_camera_point(
-                    u=u_pixel,
-                    v=v_pixel,
-                    distance=distance,
-                    camera_info=self.camera_info,
-                    color=object_class,
-                )
+                # Camera intrinsics
+                fx = self.camera_info.k[0]
+                fy = self.camera_info.k[4]
+                cx = self.camera_info.k[2]
+                cy = self.camera_info.k[5]
 
-                self.cone_map.add_to_map(new_map_point)
+                # 3D point inside optical frame
+                x_opt = (u_pixel - cx) * distance / fx
+                y_opt = (v_pixel - cy) * distance / fy
+                z_opt = distance
 
-                self.get_logger().info(
-                    f"Added {object_class} to Map at X: {new_map_point.x:.2f}, Y: {new_map_point.y:.2f}"
-                )
+                # Crafting the PointStamped to do the transformation
+                point_cam = PointStamped()
+
+                # IMPORTANT: frame_id and timestamp must be the same as the depth image
+                point_cam.header.frame_id = depth_msg.header.frame_id
+                point_cam.header.stamp = depth_msg.header.stamp
+                point_cam.point.x = x_opt
+                point_cam.point.y = y_opt
+                point_cam.point.z = z_opt
+
+                try:
+                    # Kindly asking to the TF2 package to transform the point
+                    # - lookup_transform(target_frame, source_frame, timeout)
+                    transform = self.tf_buffer.lookup_transform(
+                        self.world_frame,
+                        point_cam.header.frame_id,
+                        point_cam.header.stamp,
+                        rclpy.duration.Duration(seconds=0.1)
+                    )
+
+                    # Applying the transformation to the point
+                    point_world = do_transform_point(point_cam, transform)
+
+                    # Adding the new point inside the map
+                    new_map_point = MapPoint(
+                        x=point_world.point.x, y=point_world.point.y, color=object_class
+                    )
+
+                    self.cone_map.add_to_map(new_map_point)
+
+                    self.get_logger().info(
+                        f"Mapping {object_class} in {self.world_frame} -> X: {new_map_point.x:.2f}, Y: {new_map_point.y:.2f}"
+                    )
+
+                except Exception as e:
+                    self.get_logger().warn(
+                        f"Could not transform in {self.world_frame}: {e}"
+                    )
+
             else:
                 self.get_logger().info(
                     f"Detected {object_class}, but depth is invalid."
                 )
+
+        try:
+            # lookup_transform(target_frame, source_frame, timeout)
+            # rclpy.time.Time() to get the most recent transformation
+            transform_to_car = self.tf_buffer.lookup_transform(
+                self.car_frame,
+                self.world_frame,
+                rclpy.time.Time(),
+                rclpy.duration.Duration(seconds=0.1)
+            )
+
+            # Cleaning
+            self.cone_map.cull_map(transform_to_car, self.world_frame)
+
+            self.get_logger().info(f"Map updated, active cones: {len(self.cone_map.cone_map)}")
+
+        except Exception as e:
+            self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
 
 
 def main(args=None):
