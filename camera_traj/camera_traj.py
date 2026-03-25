@@ -116,7 +116,7 @@ class CameraTraj(Node):
         self.declare_parameter("rolling_map_safety_threshold", 0.5)
         self.declare_parameter("rolling_map_ema_filter_alpha", 0.6)
         self.declare_parameter("world_frame", "odom")
-        self.declare_parameter("car_frame", "base_link")
+        self.declare_parameter("car_frame", "zed_camera_link")
         self.declare_parameter("cull_distance_behind", -2.0)
         self.declare_parameter("cull_distance_max", 10.0)
 
