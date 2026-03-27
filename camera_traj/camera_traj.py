@@ -120,10 +120,10 @@ class CameraTraj(Node):
         self.declare_parameter("cull_distance_behind", -2.0)
         self.declare_parameter("cull_distance_max", 10.0)
 
-        self.rmsth = self.get_parameter("rolling_map_safety_threshold").double_value
-        self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").double_value
-        self.rmcb = self.get_parameter("cull_distance_behind").double_value
-        self.rmcm = self.get_parameter("cull_distance_max").double_value
+        self.rmsth = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
+        self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
+        self.rmcb = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
+        self.rmcm = self.get_parameter("cull_distance_max").get_parameter_value().double_value
 
         self.depth_topic = (
             self.get_parameter("depth_topic").get_parameter_value().string_value
