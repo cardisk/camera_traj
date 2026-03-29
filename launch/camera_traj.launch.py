@@ -28,6 +28,10 @@ def generate_launch_description():
         'cull_distance_behind', default_value='-2.0')
     cull_distance_max_arg = DeclareLaunchArgument(
         'cull_distance_max', default_value='10.0')
+    rolling_map_debug_active_arg = DeclareLaunchArgument(
+        'rolling_map_debug_active', default_value='True')
+    rolling_map_debug_topic_arg = DeclareLaunchArgument(
+        'rolling_map_debug_topic', default_value='/camera_traj/debug/rolling_map')
 
     # Node
     camera_traj_node = Node(
@@ -46,6 +50,8 @@ def generate_launch_description():
             'car_frame':                    LaunchConfiguration('car_frame'),
             'cull_distance_behind':         LaunchConfiguration('cull_distance_behind'),
             'cull_distance_max':            LaunchConfiguration('cull_distance_max'),
+            'rolling_map_debug_active':     LaunchConfiguration('rolling_map_debug_active'),
+            'rolling_map_debug_topic':      LaunchConfiguration('rolling_map_debug_topic'),
         }]
     )
 
@@ -59,5 +65,7 @@ def generate_launch_description():
         car_frame_arg,
         cull_distance_behind_arg,
         cull_distance_max_arg,
+        rolling_map_debug_active_arg,
+        rolling_map_debug_topic_arg,
         camera_traj_node
     ])

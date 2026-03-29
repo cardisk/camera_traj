@@ -9,8 +9,10 @@ from rclpy.node import Node
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
+from std_msgs.msg import ColorRGBA
 from geometry_msgs.msg import PointStamped
 from sensor_msgs.msg import CameraInfo, Image
+from visualization_msgs.msg import Marker, MarkerArray
 from driverless_msgs.msg import BoundingBoxes
 
 from tf2_geometry_msgs import do_transform_point
@@ -119,6 +121,8 @@ class CameraTraj(Node):
         self.declare_parameter("car_frame", "zed_camera_link")
         self.declare_parameter("cull_distance_behind", -2.0)
         self.declare_parameter("cull_distance_max", 10.0)
+        self.declare_parameter("rolling_map_debug_active", True)
+        self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
 
         self.rmsth = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
         self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
@@ -142,6 +146,11 @@ class CameraTraj(Node):
             self.get_parameter("world_frame").get_parameter_value().string_value
         )
 
+        self.rolling_map_debug_active = self.get_parameter("rolling_map_debug_active").get_parameter_value().bool_value
+        self.rolling_map_debug_topic = (
+            self.get_parameter("rolling_map_debug_topic").get_parameter_value().string_value
+        )
+
         # RollingMap initialization
         self.cone_map = RollingMap(
             self.rmsth,
@@ -156,6 +165,8 @@ class CameraTraj(Node):
         )
 
         # Synchronization of YOLO and Depth messages
+        self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization...")
+
         self.depth_sub = Subscriber(self, Image, self.depth_topic)
         self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic)
 
@@ -167,6 +178,14 @@ class CameraTraj(Node):
         )
 
         self.sync.registerCallback(self.cone_extractor)
+        self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization... Done!")
+
+        if self.rolling_map_debug_active:
+            self.get_logger().info("RollingMap debug activated, starting the publisher...")
+            self.marker_pub = self.create_publisher(MarkerArray, self.rolling_map_debug_topic, 10)
+            self.previous_marker_count = 0
+            self.get_logger().info("RollingMap debug activated, starting the publisher... Done!")
+
 
         self.get_logger().info("Ready!")
 
@@ -178,6 +197,9 @@ class CameraTraj(Node):
     def cone_extractor(self, depth_msg, yolo_msg):
         if self.camera_info is None:
             return
+
+        self.get_logger().info("--- CALLBACK START ---")
+        self.get_logger().info("Found a match, starting the processing...")
 
         # Transforming the ROS2 message into usable data
         try:
@@ -310,8 +332,72 @@ class CameraTraj(Node):
 
             self.get_logger().info(f"Map updated, active cones: {len(self.cone_map.cone_map)}")
 
+            if self.rolling_map_debug_active:
+                self.publish_map_markers()
+
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
+
+        self.get_logger().info("--- CALLBACK END ---")
+
+    def publish_map_markers(self):
+        marker_array = MarkerArray()
+        current_count = len(self.cone_map.cone_map)
+
+        # A new Marker for each cone
+        for i, cone in enumerate(self.cone_map.cone_map):
+            marker = Marker()
+            marker.header.frame_id = self.world_frame
+            marker.header.stamp = self.get_clock().now().to_msg()
+            marker.ns = "cones"
+            marker.id = i
+            marker.type = Marker.CYLINDER
+            marker.action = Marker.ADD
+
+            # Z-Fighting: z value a little bit higher to avoid ground collisions
+            marker.pose.position.x = cone.x
+            marker.pose.position.y = cone.y
+            marker.pose.position.z = 0.15
+
+            # Standard orientation
+            marker.pose.orientation.w = 1.0
+
+            marker.scale.x = 0.2
+            marker.scale.y = 0.2
+            marker.scale.z = 0.3
+
+            color = ColorRGBA(a=1.0)
+
+            if cone.color == "blue_cone":
+                color.b = 1.0
+            elif cone.color == "yellow_cone":
+                color.r = 1.0
+                color.g = 1.0
+            elif cone.color == "orange_cone":
+                color.r = 1.0
+                color.g = 0.5
+            elif cone.color == "large_orange_cone":
+                color.r = 1.0
+                color.g = 0.8
+            else:
+                color.r = 1.0
+                color.g = 1.0
+                color.b = 1.0
+
+            marker.color = color
+            marker_array.markers.append(marker)
+
+        # Deleting cones discarded by the rolling map culling
+        for i in range(current_count, self.previous_marker_count):
+            delete_marker = Marker()
+            delete_marker.header.frame_id = self.world_frame
+            delete_marker.ns = "cones"
+            delete_marker.id = i
+            delete_marker.action = Marker.DELETE
+            marker_array.markers.append(delete_marker)
+
+        self.previous_marker_count = current_count
+        self.marker_pub.publish(marker_array)
 
 
 def main(args=None):
