@@ -1,11 +1,14 @@
 import math
 from dataclasses import dataclass
 
+import json
 import numpy as np
 from cv_bridge import CvBridge
 
 import rclpy
 from rclpy.node import Node
+
+from rclpy.qos import qos_profile_sensor_data
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
@@ -112,6 +115,10 @@ class CameraTraj(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # ROS2 launch parameters
+
+        # Do not need this because it's a special parameter declared by ROS by default
+        # self.declare_parameter("use_sim_time", "False")
+
         self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("yolo_topic", "/cone_detection/output")
         self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
@@ -123,6 +130,8 @@ class CameraTraj(Node):
         self.declare_parameter("cull_distance_max", 10.0)
         self.declare_parameter("rolling_map_debug_active", True)
         self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
+
+        self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
 
         self.rmsth = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
         self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
@@ -167,11 +176,11 @@ class CameraTraj(Node):
         # Synchronization of YOLO and Depth messages
         self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization...")
 
-        self.depth_sub = Subscriber(self, Image, self.depth_topic)
-        self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic)
+        self.depth_sub = Subscriber(self, Image, self.depth_topic, qos_profile=qos_profile_sensor_data)
+        self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic, qos_profile=qos_profile_sensor_data)
 
-        queue_size = 10
-        max_difference_in_seconds = 0.1
+        queue_size = 50
+        max_difference_in_seconds = 0.2
 
         self.sync = ApproximateTimeSynchronizer(
             [self.depth_sub, self.yolo_sub], queue_size, max_difference_in_seconds
@@ -186,6 +195,13 @@ class CameraTraj(Node):
             self.previous_marker_count = 0
             self.get_logger().info("RollingMap debug activated, starting the publisher... Done!")
 
+        if self.use_sim_time:
+            self.get_logger().info("")
+            self.get_logger().warn("-------------------------------------------------------------------------")
+            self.get_logger().warn("Using simulation time from /clock topic")
+            self.get_logger().warn("Use this only when running this node with a bag started with --clock flag")
+            self.get_logger().warn("-------------------------------------------------------------------------")
+            self.get_logger().info("")
 
         self.get_logger().info("Ready!")
 
@@ -212,7 +228,9 @@ class CameraTraj(Node):
         # Camera frame shape
         height, width = depth_array.shape
 
-        for det in yolo_msg:
+        yolo = json.loads(yolo_msg.json)
+
+        for det in yolo:
             object_class = det["color"]
 
             xmin, ymin = det["BB"][0]
@@ -290,7 +308,7 @@ class CameraTraj(Node):
                         self.world_frame,
                         point_cam.header.frame_id,
                         point_cam.header.stamp,
-                        rclpy.duration.Duration(seconds=0.1)
+                        rclpy.duration.Duration(seconds=0.2)
                     )
 
                     # Applying the transformation to the point

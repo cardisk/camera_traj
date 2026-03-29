@@ -10,6 +10,8 @@ def generate_launch_description():
     pkg_camera_traj = get_package_share_directory('camera_traj')
 
     # Arguments
+    use_sim_time_arg = DeclareLaunchArgument(
+        'use_sim_time', default_value='False')
     depth_topic_arg = DeclareLaunchArgument(
         'depth_topic', default_value='/zed/zed_node/depth/depth_registered')
     yolo_topic_arg = DeclareLaunchArgument(
@@ -41,6 +43,7 @@ def generate_launch_description():
         output='screen',
         respawn=True,
         parameters=[{
+            'use_sim_time':                 LaunchConfiguration('use_sim_time'),
             'depth_topic':                  LaunchConfiguration('depth_topic'),
             'yolo_topic':                   LaunchConfiguration('yolo_topic'),
             'camera_info_topic':            LaunchConfiguration('camera_info_topic'),
@@ -56,6 +59,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
+        use_sim_time_arg,
         depth_topic_arg,
         yolo_topic_arg,
         camera_info_topic_arg,
