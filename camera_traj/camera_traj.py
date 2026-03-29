@@ -536,7 +536,6 @@ class CameraTraj(Node):
         if len(midpoints) < 3:
             return
 
-        # 1. Trova il punto d'inizio (quello con X locale minore)
         # Find the starting point of the trajectory (min local X)
         start_point = None
         min_local_x = float('inf')
