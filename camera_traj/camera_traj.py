@@ -1,6 +1,9 @@
 import math
 from dataclasses import dataclass
 
+import scipy.interpolate as spi
+from scipy.spatial import Delaunay
+
 import json
 import numpy as np
 from cv_bridge import CvBridge
@@ -13,10 +16,10 @@ from rclpy.qos import qos_profile_sensor_data
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
 from std_msgs.msg import ColorRGBA
-from geometry_msgs.msg import PointStamped
+from geometry_msgs.msg import Point, PointStamped
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker, MarkerArray
-from driverless_msgs.msg import BoundingBoxes
+from driverless_msgs.msg import BoundingBoxes, Trajectory
 
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformListener
@@ -25,8 +28,10 @@ from tf2_ros import Buffer, TransformListener
 @dataclass
 class MapPoint:
     """
+    Standard coordinates REP 103
     x axis positive at front
-    y axis positive at right
+    y axis positive at left
+
     color of the cone
     hit_count is the number of times the cone is seen
 
@@ -130,6 +135,9 @@ class CameraTraj(Node):
         self.declare_parameter("cull_distance_max", 10.0)
         self.declare_parameter("rolling_map_debug_active", True)
         self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
+        self.declare_parameter("trajectory_debug_active", True)
+        self.declare_parameter("trajectory_debug_topic", "/camera_traj/debug/trajectory")
+        self.declare_parameter("output_topic", "/camera_traj/output")
 
         self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
 
@@ -158,6 +166,15 @@ class CameraTraj(Node):
         self.rolling_map_debug_active = self.get_parameter("rolling_map_debug_active").get_parameter_value().bool_value
         self.rolling_map_debug_topic = (
             self.get_parameter("rolling_map_debug_topic").get_parameter_value().string_value
+        )
+
+        self.trajectory_debug_active = self.get_parameter("trajectory_debug_active").get_parameter_value().bool_value
+        self.trajectory_debug_topic = (
+            self.get_parameter("trajectory_debug_topic").get_parameter_value().string_value
+        )
+
+        self.output_topic = (
+            self.get_parameter("output_topic").get_parameter_value().string_value
         )
 
         # RollingMap initialization
@@ -189,11 +206,20 @@ class CameraTraj(Node):
         self.sync.registerCallback(self.cone_extractor)
         self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization... Done!")
 
+        self.get_logger().info("Starting the Trajectory publisher...")
+        self.output_publisher = self.create_publisher(Trajectory, self.output_topic, 10)
+        self.get_logger().info("Starting the Trajectory publisher... Done!")
+
         if self.rolling_map_debug_active:
             self.get_logger().info("RollingMap debug activated, starting the publisher...")
-            self.marker_pub = self.create_publisher(MarkerArray, self.rolling_map_debug_topic, 10)
+            self.rolling_map_marker_pub = self.create_publisher(MarkerArray, self.rolling_map_debug_topic, 10)
             self.previous_marker_count = 0
             self.get_logger().info("RollingMap debug activated, starting the publisher... Done!")
+
+        if self.trajectory_debug_active:
+            self.get_logger().info("Trajectory debug activated, starting the publisher...")
+            self.trajectory_marker_pub = self.create_publisher(Marker, self.trajectory_debug_topic, 10)
+            self.get_logger().info("Trajectory debug activated, starting the publisher... Done!")
 
         if self.use_sim_time:
             self.get_logger().info("")
@@ -355,6 +381,12 @@ class CameraTraj(Node):
 
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
+            self.get_logger().info("--- CALLBACK END ---")
+            return
+
+        midpoints = self.calculate_centerline()
+        if len(midpoints) > 0:
+            self.publish_trajectory(midpoints, transform_to_car)
 
         self.get_logger().info("--- CALLBACK END ---")
 
@@ -415,7 +447,177 @@ class CameraTraj(Node):
             marker_array.markers.append(delete_marker)
 
         self.previous_marker_count = current_count
-        self.marker_pub.publish(marker_array)
+        self.rolling_map_marker_pub.publish(marker_array)
+
+    def calculate_centerline(self):
+        left_cones = []
+        right_cones = []
+
+        for cone in self.cone_map.cone_map:
+            if cone.color == "blue_cone":
+                left_cones.append([cone.x, cone.y])
+
+            elif cone.color == "yellow_cone":
+                right_cones.append([cone.x, cone.y])
+
+            elif cone.color in ["orange_cone", "large_orange_cone"]:
+                if cone.y > 0.0:  # Positive Y = Left (REP 103)
+                    left_cones.append([cone.x, cone.y])
+
+                else:
+                    right_cones.append([cone.x, cone.y])
+
+        if len(left_cones) < 1 or len(right_cones) < 1:
+            return []
+
+        all_cones = np.array(left_cones + right_cones)
+        sides = np.array([0]*len(left_cones) + [1]*len(right_cones))
+
+        try:
+            tri = Delaunay(all_cones)
+
+        except Exception:
+            return []
+
+        midpoints = []
+        for simplex in tri.simplices:
+            edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
+
+            for p1_idx, p2_idx in edges:
+                if sides[p1_idx] != sides[p2_idx]:
+                    p1 = all_cones[p1_idx]
+                    p2 = all_cones[p2_idx]
+                    dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+                    if 1.5 < dist < 8.0:
+                        midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
+
+        if len(midpoints) > 0:
+            midpoints = np.unique(np.array(midpoints), axis=0).tolist()
+
+        return midpoints
+
+    def smooth_and_resample(self, ordered_points, resolution=0.5):
+        if len(ordered_points) < 4:
+            return ordered_points
+
+        pts = np.array(ordered_points)
+        x = pts[:, 0]
+        y = pts[:, 1]
+
+        diffs = np.diff(pts, axis=0)
+        dists = np.linalg.norm(diffs, axis=1)
+        num_points = max(int(np.sum(dists) / resolution), 2)
+
+        try:
+            tck, _u = spi.splprep([x, y], s=0.1, k=3)
+            u_new = np.linspace(0, 1.0, num_points)
+            new_x, new_y = spi.splev(u_new, tck)
+            return np.vstack((new_x, new_y)).T.tolist()
+
+        except Exception:
+            return ordered_points
+
+    def get_curvature(self, p1, p2, p3):
+        area = 0.5 * abs(p1[0]*(p2[1] - p3[1]) + p2[0]*(p3[1] - p1[1]) + p3[0]*(p1[1] - p2[1]))
+        a = math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+        b = math.hypot(p2[0]-p3[0], p2[1]-p3[1])
+        c = math.hypot(p3[0]-p1[0], p3[1]-p1[1])
+
+        if a * b * c == 0.0:
+            return 0.0
+
+        curvature = (4.0 * area) / (a * b * c)
+        cross_z = (p2[0] - p1[0]) * (p3[1] - p2[1]) - (p2[1] - p1[1]) * (p3[0] - p2[0])
+
+        return curvature * (1.0 if cross_z > 0 else -1.0)
+
+    def publish_trajectory(self, midpoints, transform_to_car):
+        if len(midpoints) < 3:
+            return
+
+        # 1. Trova il punto d'inizio (quello con X locale minore)
+        # Find the starting point of the trajectory (min local X)
+        start_point = None
+        min_local_x = float('inf')
+
+        for p in midpoints:
+            p_world = PointStamped()
+            p_world.header.frame_id = self.world_frame
+            p_world.point.x = float(p[0])
+            p_world.point.y = float(p[1])
+            p_world.point.z = 0.0
+
+            p_local = do_transform_point(p_world, transform_to_car)
+
+            if p_local.point.x < min_local_x:
+                min_local_x = p_local.point.x
+                start_point = p
+
+        # Spatial ordering
+        current_pos = start_point
+        ordered_points = [current_pos]
+        unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
+
+        while unvisited:
+            distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
+            closest_idx = np.argmin(distances)
+            closest_point = unvisited.pop(closest_idx)
+            ordered_points.append(closest_point)
+            current_pos = closest_point
+
+        # Smoothing and resampling
+        dense_points = self.smooth_and_resample(ordered_points, resolution=0.5)
+
+        if len(dense_points) < 3:
+            return
+
+        # Message and physics calc
+        traj_msg = Trajectory()
+        traj_msg.header.frame_id = self.world_frame
+        traj_msg.header.stamp = self.get_clock().now().to_msg()
+
+        MAX_LAT_ACCEL = 5.0
+        MAX_SPEED = 15.0
+        MIN_SPEED = 3.0
+
+        k_array = [0.0] * len(dense_points)
+        v_array = [0.0] * len(dense_points)
+
+        for i in range(1, len(dense_points) - 1):
+            k = self.get_curvature(dense_points[i-1], dense_points[i], dense_points[i+1])
+            k_array[i] = k
+            abs_k = abs(k)
+            v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
+
+        k_array[0] = k_array[1]
+        v_array[0] = v_array[1]
+        k_array[-1] = k_array[-2]
+        v_array[-1] = v_array[-2]
+
+        for i, p in enumerate(dense_points):
+            pt = Point()
+            pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
+            traj_msg.trajectory.append(pt)
+            traj_msg.curvatures.append(float(k_array[i]))
+            traj_msg.velocities.append(float(v_array[i]))
+
+        self.output_publisher.publish(traj_msg)
+
+        # Debug
+        if self.trajectory_debug_active:
+            vis_msg = Marker()
+            vis_msg.header = traj_msg.header
+            vis_msg.ns = "trajectory"
+            vis_msg.id = 0
+            vis_msg.type = Marker.LINE_STRIP
+            vis_msg.action = Marker.ADD
+            vis_msg.pose.orientation.w = 1.0
+            vis_msg.scale.x = 0.1
+            vis_msg.color.g = 1.0 # Green
+            vis_msg.color.a = 1.0
+            vis_msg.points = traj_msg.trajectory
+            self.trajectory_marker_pub.publish(vis_msg)
 
 
 def main(args=None):

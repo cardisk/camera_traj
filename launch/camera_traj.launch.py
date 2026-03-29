@@ -34,6 +34,12 @@ def generate_launch_description():
         'rolling_map_debug_active', default_value='True')
     rolling_map_debug_topic_arg = DeclareLaunchArgument(
         'rolling_map_debug_topic', default_value='/camera_traj/debug/rolling_map')
+    trajectory_debug_active_arg = DeclareLaunchArgument(
+        'trajectory_debug_active', default_value='True')
+    trajectory_debug_topic_arg = DeclareLaunchArgument(
+        'trajectory_debug_topic', default_value='/camera_traj/debug/trajectory')
+    output_topic_arg = DeclareLaunchArgument(
+        'output_topic', default_value='/camera_traj/output')
 
     # Node
     camera_traj_node = Node(
@@ -55,6 +61,9 @@ def generate_launch_description():
             'cull_distance_max':            LaunchConfiguration('cull_distance_max'),
             'rolling_map_debug_active':     LaunchConfiguration('rolling_map_debug_active'),
             'rolling_map_debug_topic':      LaunchConfiguration('rolling_map_debug_topic'),
+            'trajectory_debug_active':      LaunchConfiguration('trajectory_debug_active'),
+            'trajectory_debug_topic':       LaunchConfiguration('trajectory_debug_topic'),
+            'output_topic':                 LaunchConfiguration('output_topic'),
         }]
     )
 
@@ -71,5 +80,8 @@ def generate_launch_description():
         cull_distance_max_arg,
         rolling_map_debug_active_arg,
         rolling_map_debug_topic_arg,
+        trajectory_debug_active_arg,
+        trajectory_debug_topic_arg,
+        output_topic_arg,
         camera_traj_node
     ])
