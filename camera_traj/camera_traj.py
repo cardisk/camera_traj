@@ -123,12 +123,14 @@ class CameraTraj(Node):
 
         # Do not need this because it's a special parameter declared by ROS by default
         # self.declare_parameter("use_sim_time", "False")
+        self.declare_parameter("pure_local_trajectory", False)
 
         self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("yolo_topic", "/cone_detection/output")
         self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
-        self.declare_parameter("rolling_map_safety_threshold", 0.5)
-        self.declare_parameter("rolling_map_ema_filter_alpha", 0.6)
+        self.declare_parameter("rolling_map_safety_threshold", 1.5)
+        self.declare_parameter("rolling_map_ema_filter_alpha", 0.3)
+        self.declare_parameter("rolling_map_hit_count_threshold", 3)
         self.declare_parameter("world_frame", "odom")
         self.declare_parameter("car_frame", "zed_camera_link")
         self.declare_parameter("cull_distance_behind", -2.0)
@@ -139,12 +141,14 @@ class CameraTraj(Node):
         self.declare_parameter("trajectory_debug_topic", "/camera_traj/debug/trajectory")
         self.declare_parameter("output_topic", "/camera_traj/output")
 
-        self.use_sim_time = self.get_parameter("use_sim_time").get_parameter_value().bool_value
+        self.use_sim_time          = self.get_parameter("use_sim_time").get_parameter_value().bool_value
+        self.pure_local_trajectory = self.get_parameter("pure_local_trajectory").get_parameter_value().bool_value
 
-        self.rmsth = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
-        self.rmefa = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
-        self.rmcb = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
-        self.rmcm = self.get_parameter("cull_distance_max").get_parameter_value().double_value
+        self.rmsth  = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
+        self.rmefa  = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
+        self.rmhcth = self.get_parameter("rolling_map_hit_count_threshold").get_parameter_value().integer_value
+        self.rmcb   = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
+        self.rmcm   = self.get_parameter("cull_distance_max").get_parameter_value().double_value
 
         self.depth_topic = (
             self.get_parameter("depth_topic").get_parameter_value().string_value
@@ -176,6 +180,11 @@ class CameraTraj(Node):
         self.output_topic = (
             self.get_parameter("output_topic").get_parameter_value().string_value
         )
+
+        if self.pure_local_trajectory:
+            self.rmhcth = 1
+            self.rmcb   = 0.0
+            self.world_frame = self.car_frame
 
         # RollingMap initialization
         self.cone_map = RollingMap(
@@ -227,21 +236,24 @@ class CameraTraj(Node):
             self.get_logger().warn("Using simulation time from /clock topic")
             self.get_logger().warn("Use this only when running this node with a bag started with --clock flag")
             self.get_logger().warn("-------------------------------------------------------------------------")
-            self.get_logger().info("")
 
+        self.get_logger().info("")
         self.get_logger().info("Ready!")
 
     def info_callback(self, camera_info_msg):
         if self.camera_info is None:
             self.camera_info = camera_info_msg
+            self.get_logger().info("")
             self.get_logger().info("Camera Intrinsics received!")
 
     def cone_extractor(self, depth_msg, yolo_msg):
         if self.camera_info is None:
             return
 
+        self.get_logger().info("")
         self.get_logger().info("--- CALLBACK START ---")
         self.get_logger().info("Found a match, starting the processing...")
+        self.get_logger().info("")
 
         # Transforming the ROS2 message into usable data
         try:
@@ -255,6 +267,9 @@ class CameraTraj(Node):
         height, width = depth_array.shape
 
         yolo = json.loads(yolo_msg.json)
+
+        if self.pure_local_trajectory:
+            self.cone_map.cone_map.clear()
 
         for det in yolo:
             object_class = det["color"]
@@ -281,10 +296,10 @@ class CameraTraj(Node):
                 continue
 
             # BB resizing
-            patch_xmin = int(xmin + (w * 0.35))
-            patch_xmax = int(xmax - (w * 0.35))
-            patch_ymin = int(ymin + (h * 0.80))
-            patch_ymax = ymax
+            patch_xmin = int(xmin + (w * 0.25))
+            patch_xmax = int(xmax - (w * 0.25))
+            patch_ymin = int(ymin + (h * 0.50))
+            patch_ymax = int(ymax - (h * 0.05))
 
             patch_xmin = max(0, min(patch_xmin, width - 1))
             patch_xmax = max(patch_xmin + 1, min(patch_xmax, width))
@@ -300,7 +315,7 @@ class CameraTraj(Node):
             if valid_depths.size > 0:
                 # Using the percentiles to extract depth information
                 # 25% is more ore less the correct value estimation
-                distance = float(np.percentile(valid_depths, 25))
+                distance = float(np.percentile(valid_depths, 50))
 
                 # Bottom center point inside the resiczed BB
                 u_pixel = int((xmin + xmax) / 2)
@@ -333,7 +348,7 @@ class CameraTraj(Node):
                     transform = self.tf_buffer.lookup_transform(
                         self.world_frame,
                         point_cam.header.frame_id,
-                        point_cam.header.stamp,
+                        rclpy.time.Time(), #point_cam.header.stamp,
                         rclpy.duration.Duration(seconds=0.2)
                     )
 
@@ -374,6 +389,7 @@ class CameraTraj(Node):
             # Cleaning
             self.cone_map.cull_map(transform_to_car, self.world_frame)
 
+            self.get_logger().info("")
             self.get_logger().info(f"Map updated, active cones: {len(self.cone_map.cone_map)}")
 
             if self.rolling_map_debug_active:
@@ -384,9 +400,18 @@ class CameraTraj(Node):
             self.get_logger().info("--- CALLBACK END ---")
             return
 
-        midpoints = self.calculate_centerline()
-        if len(midpoints) > 0:
+        midpoints = self.calculate_centerline(self.rmhcth)
+        midpoints_len = len(midpoints)
+
+        if midpoints_len > 0:
+            self.get_logger().info("")
+            self.get_logger().info(f"Trajcetory has {midpoints_len} midpoints, smoothing and resampling the curve before publishing...")
             self.publish_trajectory(midpoints, transform_to_car)
+            self.get_logger().info(f"Trajcetory has {midpoints_len} midpoints, smoothing and resampling the curve before publishing... Done!")
+
+        else:
+            self.get_logger().info("")
+            self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
 
         self.get_logger().info("--- CALLBACK END ---")
 
@@ -424,11 +449,11 @@ class CameraTraj(Node):
                 color.r = 1.0
                 color.g = 1.0
             elif cone.color == "orange_cone":
-                color.r = 1.0
+                color.r = 0.8
                 color.g = 0.5
             elif cone.color == "large_orange_cone":
                 color.r = 1.0
-                color.g = 0.8
+                color.g = 0.1
             else:
                 color.r = 1.0
                 color.g = 1.0
@@ -449,11 +474,14 @@ class CameraTraj(Node):
         self.previous_marker_count = current_count
         self.rolling_map_marker_pub.publish(marker_array)
 
-    def calculate_centerline(self):
+    def calculate_centerline(self, min_hit_count):
         left_cones = []
         right_cones = []
 
         for cone in self.cone_map.cone_map:
+            if cone.hit_count < min_hit_count:
+                continue
+
             if cone.color == "blue_cone":
                 left_cones.append([cone.x, cone.y])
 
@@ -489,7 +517,7 @@ class CameraTraj(Node):
                     p2 = all_cones[p2_idx]
                     dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-                    if 1.5 < dist < 8.0:
+                    if 2.0 < dist < 8.0:
                         midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
 
         if len(midpoints) > 0:
@@ -510,7 +538,7 @@ class CameraTraj(Node):
         num_points = max(int(np.sum(dists) / resolution), 2)
 
         try:
-            tck, _u = spi.splprep([x, y], s=0.1, k=3)
+            tck, _u = spi.splprep([x, y], s=3.0, k=3)
             u_new = np.linspace(0, 1.0, num_points)
             new_x, new_y = spi.splev(u_new, tck)
             return np.vstack((new_x, new_y)).T.tolist()
@@ -558,12 +586,16 @@ class CameraTraj(Node):
         ordered_points = [current_pos]
         unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
 
+        MIN_DIST_BETWEEN_WAYPOINTS = 0.5
+
         while unvisited:
             distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
             closest_idx = np.argmin(distances)
             closest_point = unvisited.pop(closest_idx)
-            ordered_points.append(closest_point)
-            current_pos = closest_point
+
+            if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > MIN_DIST_BETWEEN_WAYPOINTS:
+                ordered_points.append(closest_point)
+                current_pos = closest_point
 
         # Smoothing and resampling
         dense_points = self.smooth_and_resample(ordered_points, resolution=0.5)
