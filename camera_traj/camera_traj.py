@@ -1,5 +1,4 @@
 import math
-from dataclasses import dataclass
 
 import scipy.interpolate as spi
 from scipy.spatial import Delaunay
@@ -24,83 +23,7 @@ from driverless_msgs.msg import BoundingBoxes, Trajectory
 from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformListener
 
-
-@dataclass
-class MapPoint:
-    """
-    Standard coordinates REP 103
-    x axis positive at front
-    y axis positive at left
-
-    color of the cone
-    hit_count is the number of times the cone is seen
-
-    distance from the ground is ignored
-    """
-
-    x: float
-    y: float
-    color: str
-    hit_count: int = 1
-
-
-class RollingMap:
-    def __init__(self, rmsth, efa, rmcb, rmcm):
-        self.safety_threshold: float = rmsth
-        self.cone_map: list[MapPoint] = []
-        self.ema_filter_alpha = efa
-        self.cull_behind_th = rmcb
-        self.cull_max_th = rmcm
-
-    def add_to_map(self, new_point: MapPoint):
-        best_dist = float("inf")
-        best_match = None
-
-        for cone in self.cone_map:
-            if cone.color == new_point.color:
-                dist = math.hypot(cone.x - new_point.x, cone.y - new_point.y)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_match = cone
-
-        if best_match is not None and best_dist <= self.safety_threshold:
-            # Exponential Moving Average (EMA) updating
-            best_match.x = (self.ema_filter_alpha * best_match.x) + (
-                (1.0 - self.ema_filter_alpha) * new_point.x
-            )
-            best_match.y = (self.ema_filter_alpha * best_match.y) + (
-                (1.0 - self.ema_filter_alpha) * new_point.y
-            )
-            best_match.hit_count += 1
-        else:
-            self.cone_map.append(new_point)
-
-    def cull_map(self, transform_to_car, world_frame):
-        """
-        Remove the cones too far behind the car
-
-        transform_to_car: world_frame to camera_frame
-        """
-        kept_cones = []
-
-        for cone in self.cone_map:
-            # Crafting a ROS2 message to the transformation
-            p_odom = PointStamped()
-            # Here there is no need to use the complete header to do the transformation
-            p_odom.header.frame_id = world_frame
-            p_odom.point.x = cone.x
-            p_odom.point.y = cone.y
-            p_odom.point.z = 0.0
-
-            p_car = do_transform_point(p_odom, transform_to_car)
-
-            # Culling the cones
-            total_distance = math.hypot(p_car.point.x, p_car.point.y)
-
-            if p_car.point.x > self.cull_behind_th and total_distance < self.cull_max_th:
-                kept_cones.append(cone)
-
-        self.cone_map = kept_cones
+from .rolling_map import MapPoint, RollingMap
 
 
 class CameraTraj(Node):
@@ -119,80 +42,116 @@ class CameraTraj(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # ROS2 launch parameters
+        # ROS2 parameters
 
-        # Do not need this because it's a special parameter declared by ROS by default
+        # Do not need this because it's a special parameter declared by default
         # self.declare_parameter("use_sim_time", "False")
         self.declare_parameter("pure_local_trajectory", False)
+        self.declare_parameter("debug_output", True)
 
         self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
         self.declare_parameter("yolo_topic", "/cone_detection/output")
         self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
+        self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
+        self.declare_parameter("trajectory_debug_topic", "/camera_traj/debug/trajectory")
+        self.declare_parameter("output_topic", "/camera_traj/output")
         self.declare_parameter("rolling_map_safety_threshold", 1.5)
         self.declare_parameter("rolling_map_ema_filter_alpha", 0.3)
         self.declare_parameter("rolling_map_hit_count_threshold", 3)
-        self.declare_parameter("world_frame", "odom")
-        self.declare_parameter("car_frame", "zed_camera_link")
         self.declare_parameter("cull_distance_behind", -2.0)
-        self.declare_parameter("cull_distance_max", 10.0)
-        self.declare_parameter("rolling_map_debug_active", True)
-        self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
-        self.declare_parameter("trajectory_debug_active", True)
-        self.declare_parameter("trajectory_debug_topic", "/camera_traj/debug/trajectory")
-        self.declare_parameter("output_topic", "/camera_traj/output")
+        self.declare_parameter("cull_distance_max", 15.0)
+        self.declare_parameter("delaunay_min_distance", 2.0)
+        self.declare_parameter("delaunay_max_distance", 8.0)
+        self.declare_parameter("spline_smoothing", 3.0)
+        self.declare_parameter("spline_degree", 3)
+        self.declare_parameter("spline_sampling_resolution", 0.5)
+        self.declare_parameter("world_frame", "map")
+        self.declare_parameter("car_frame", "zed_camera_link")
 
+        # Flags
         self.use_sim_time          = self.get_parameter("use_sim_time").get_parameter_value().bool_value
         self.pure_local_trajectory = self.get_parameter("pure_local_trajectory").get_parameter_value().bool_value
+        self.debug_output          = self.get_parameter("debug_output").get_parameter_value().bool_value
 
+        # Settings
         self.rmsth  = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
         self.rmefa  = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
         self.rmhcth = self.get_parameter("rolling_map_hit_count_threshold").get_parameter_value().integer_value
+
         self.rmcb   = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
         self.rmcm   = self.get_parameter("cull_distance_max").get_parameter_value().double_value
 
-        self.depth_topic = (
-            self.get_parameter("depth_topic").get_parameter_value().string_value
-        )
+        self.delaunay_min_distance = self.get_parameter("delaunay_min_distance").get_parameter_value().double_value
+        self.delaunay_max_distance = self.get_parameter("delaunay_max_distance").get_parameter_value().double_value
 
-        self.yolo_topic = (
-            self.get_parameter("yolo_topic").get_parameter_value().string_value
-        )
+        self.spline_smoothing           = self.get_parameter("spline_smoothing").get_parameter_value().double_value
+        self.spline_degree              = self.get_parameter("spline_degree").get_parameter_value().integer_value
+        self.spline_sampling_resolution = self.get_parameter("spline_sampling_resolution").get_parameter_value().double_value
 
-        self.camera_info_topic = (
-            self.get_parameter("camera_info_topic").get_parameter_value().string_value
-        )
+        self.car_frame   = self.get_parameter("car_frame").get_parameter_value().string_value
+        self.world_frame = self.get_parameter("world_frame").get_parameter_value().string_value
 
-        self.car_frame = self.get_parameter("car_frame").get_parameter_value().string_value
-        self.world_frame = (
-            self.get_parameter("world_frame").get_parameter_value().string_value
-        )
-
-        self.rolling_map_debug_active = self.get_parameter("rolling_map_debug_active").get_parameter_value().bool_value
-        self.rolling_map_debug_topic = (
-            self.get_parameter("rolling_map_debug_topic").get_parameter_value().string_value
-        )
-
-        self.trajectory_debug_active = self.get_parameter("trajectory_debug_active").get_parameter_value().bool_value
-        self.trajectory_debug_topic = (
-            self.get_parameter("trajectory_debug_topic").get_parameter_value().string_value
-        )
-
-        self.output_topic = (
-            self.get_parameter("output_topic").get_parameter_value().string_value
-        )
+        # Topics
+        self.depth_topic             = self.get_parameter("depth_topic").get_parameter_value().string_value
+        self.yolo_topic              = self.get_parameter("yolo_topic").get_parameter_value().string_value
+        self.camera_info_topic       = self.get_parameter("camera_info_topic").get_parameter_value().string_value
+        self.rolling_map_debug_topic = self.get_parameter("rolling_map_debug_topic").get_parameter_value().string_value
+        self.trajectory_debug_topic  = self.get_parameter("trajectory_debug_topic").get_parameter_value().string_value
+        self.output_topic            = self.get_parameter("output_topic").get_parameter_value().string_value
 
         if self.pure_local_trajectory:
             self.rmhcth = 1
             self.rmcb   = 0.0
             self.world_frame = self.car_frame
 
-        # RollingMap initialization
-        self.cone_map = RollingMap(
+        self.rolling_map = RollingMap(
             self.rmsth,
             self.rmefa,
             self.rmcb,
             self.rmcm
         )
+
+        self.get_logger().info("- Flags -----------------------------------------------------------------")
+        self.get_logger().info(f"  * simulation timestamps: {self.use_sim_time}")
+        self.get_logger().info(f"  * pure local trajectory: {self.pure_local_trajectory}")
+        self.get_logger().info(f"  * output debug topics: {self.debug_output}")
+        self.get_logger().info("-------------------------------------------------------------------------")
+
+        self.get_logger().info("")
+
+        self.get_logger().info("- Settings --------------------------------------------------------------")
+        self.get_logger().info(f"  * rolling mapping safety threshold: {self.rmsth}m")
+        self.get_logger().info(f"  * rolling mapping EMA alpha: {self.rmefa}")
+        self.get_logger().info(f"  * rolling mapping hit count threshold: {self.rmhcth}")
+        self.get_logger().info("")
+        self.get_logger().info(f"  * rolling mapping cull distance behind car: {self.rmcb}m")
+        self.get_logger().info(f"  * rolling mapping cull distance ahead car: {self.rmcm}m")
+        self.get_logger().info("")
+        self.get_logger().info(f"  * Delaunay minimum distance: {self.delaunay_min_distance}m")
+        self.get_logger().info(f"  * Delaunay maximum distance: {self.delaunay_max_distance}m")
+        self.get_logger().info(f"  * spline smoothing: {self.spline_smoothing}")
+        self.get_logger().info(f"  * spline degree: {self.spline_degree}")
+        self.get_logger().info(f"  * spline sampling resolution: {self.spline_sampling_resolution}m")
+        self.get_logger().info("")
+        self.get_logger().info(f"  * TF car frame: {self.car_frame}")
+        self.get_logger().info(f"  * TF world frame: {self.world_frame}")
+        self.get_logger().info("-------------------------------------------------------------------------")
+
+        self.get_logger().info("")
+
+        self.get_logger().info("- Topics ----------------------------------------------------------------")
+        self.get_logger().info(f"  * depth: {self.depth_topic}")
+        self.get_logger().info(f"  * camera_info: {self.camera_info_topic}")
+        self.get_logger().info(f"  * yolo: {self.yolo_topic}")
+        self.get_logger().info("")
+        self.get_logger().info(f"  * output: {self.output_topic}")
+        self.get_logger().info("")
+
+        if self.debug_output:
+            self.get_logger().info(f"  * rolling map: {self.rolling_map_debug_topic}")
+            self.get_logger().info(f"  * trajectory: {self.trajectory_debug_topic}")
+
+        self.get_logger().info("-------------------------------------------------------------------------")
 
         # Camera intrinsics subscriber to take camera information
         self.info_sub = self.create_subscription(
@@ -200,8 +159,6 @@ class CameraTraj(Node):
         )
 
         # Synchronization of YOLO and Depth messages
-        self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization...")
-
         self.depth_sub = Subscriber(self, Image, self.depth_topic, qos_profile=qos_profile_sensor_data)
         self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic, qos_profile=qos_profile_sensor_data)
 
@@ -213,22 +170,14 @@ class CameraTraj(Node):
         )
 
         self.sync.registerCallback(self.cone_extractor)
-        self.get_logger().info("Starting the YOLO and DEPTH subscribers synchronization... Done!")
 
-        self.get_logger().info("Starting the Trajectory publisher...")
         self.output_publisher = self.create_publisher(Trajectory, self.output_topic, 10)
-        self.get_logger().info("Starting the Trajectory publisher... Done!")
 
-        if self.rolling_map_debug_active:
-            self.get_logger().info("RollingMap debug activated, starting the publisher...")
+        if self.debug_output:
             self.rolling_map_marker_pub = self.create_publisher(MarkerArray, self.rolling_map_debug_topic, 10)
             self.previous_marker_count = 0
-            self.get_logger().info("RollingMap debug activated, starting the publisher... Done!")
 
-        if self.trajectory_debug_active:
-            self.get_logger().info("Trajectory debug activated, starting the publisher...")
             self.trajectory_marker_pub = self.create_publisher(Marker, self.trajectory_debug_topic, 10)
-            self.get_logger().info("Trajectory debug activated, starting the publisher... Done!")
 
         if self.use_sim_time:
             self.get_logger().info("")
@@ -250,11 +199,6 @@ class CameraTraj(Node):
         if self.camera_info is None:
             return
 
-        self.get_logger().info("")
-        self.get_logger().info("--- CALLBACK START ---")
-        self.get_logger().info("Found a match, starting the processing...")
-        self.get_logger().info("")
-
         # Transforming the ROS2 message into usable data
         try:
             depth_array = self.bridge.imgmsg_to_cv2(depth_msg, desired_encoding="32FC1")
@@ -269,7 +213,7 @@ class CameraTraj(Node):
         yolo = json.loads(yolo_msg.json)
 
         if self.pure_local_trajectory:
-            self.cone_map.cone_map.clear()
+            self.rolling_map.cone_map.clear()
 
         for det in yolo:
             object_class = det["color"]
@@ -314,7 +258,7 @@ class CameraTraj(Node):
 
             if valid_depths.size > 0:
                 # Using the percentiles to extract depth information
-                # 25% is more ore less the correct value estimation
+                # 50% is the median, it should remove the noise
                 distance = float(np.percentile(valid_depths, 50))
 
                 # Bottom center point inside the resiczed BB
@@ -335,7 +279,7 @@ class CameraTraj(Node):
                 # Crafting the PointStamped to do the transformation
                 point_cam = PointStamped()
 
-                # IMPORTANT: frame_id and timestamp must be the same as the depth image
+                # [IMPORTANT] frame_id and timestamp must be the same as the depth image
                 point_cam.header.frame_id = depth_msg.header.frame_id
                 point_cam.header.stamp = depth_msg.header.stamp
                 point_cam.point.x = x_opt
@@ -348,23 +292,17 @@ class CameraTraj(Node):
                     transform = self.tf_buffer.lookup_transform(
                         self.world_frame,
                         point_cam.header.frame_id,
-                        rclpy.time.Time(), #point_cam.header.stamp,
+                        rclpy.time.Time(),  # get the latest transformation
                         rclpy.duration.Duration(seconds=0.2)
                     )
 
-                    # Applying the transformation to the point
                     point_world = do_transform_point(point_cam, transform)
 
-                    # Adding the new point inside the map
                     new_map_point = MapPoint(
                         x=point_world.point.x, y=point_world.point.y, color=object_class
                     )
 
                     self.cone_map.add_to_map(new_map_point)
-
-                    self.get_logger().info(
-                        f"Mapping {object_class} in {self.world_frame} -> X: {new_map_point.x:.2f}, Y: {new_map_point.y:.2f}"
-                    )
 
                 except Exception as e:
                     self.get_logger().warn(
@@ -377,47 +315,40 @@ class CameraTraj(Node):
                 )
 
         try:
-            # lookup_transform(target_frame, source_frame, timeout)
-            # rclpy.time.Time() to get the most recent transformation
+            # Kindly asking to the TF2 package to transform the point
+            # - lookup_transform(target_frame, source_frame, timeout)
             transform_to_car = self.tf_buffer.lookup_transform(
                 self.car_frame,
                 self.world_frame,
-                rclpy.time.Time(),
-                rclpy.duration.Duration(seconds=0.1)
+                rclpy.time.Time(),  # get the latest transformation
+                rclpy.duration.Duration(seconds=0.2)
             )
 
-            # Cleaning
-            self.cone_map.cull_map(transform_to_car, self.world_frame)
+            # Cleaning the map
+            self.rolling_map.cull_map(transform_to_car, self.world_frame)
 
             self.get_logger().info("")
             self.get_logger().info(f"Map updated, active cones: {len(self.cone_map.cone_map)}")
 
-            if self.rolling_map_debug_active:
+            if self.debug_output:
                 self.publish_map_markers()
 
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
-            self.get_logger().info("--- CALLBACK END ---")
             return
 
         midpoints = self.calculate_centerline(self.rmhcth)
         midpoints_len = len(midpoints)
 
         if midpoints_len > 0:
-            self.get_logger().info("")
-            self.get_logger().info(f"Trajcetory has {midpoints_len} midpoints, smoothing and resampling the curve before publishing...")
             self.publish_trajectory(midpoints, transform_to_car)
-            self.get_logger().info(f"Trajcetory has {midpoints_len} midpoints, smoothing and resampling the curve before publishing... Done!")
 
         else:
-            self.get_logger().info("")
             self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
-
-        self.get_logger().info("--- CALLBACK END ---")
 
     def publish_map_markers(self):
         marker_array = MarkerArray()
-        current_count = len(self.cone_map.cone_map)
+        current_count = len(self.rolling_map.cone_map)
 
         # A new Marker for each cone
         for i, cone in enumerate(self.cone_map.cone_map):
@@ -478,7 +409,7 @@ class CameraTraj(Node):
         left_cones = []
         right_cones = []
 
-        for cone in self.cone_map.cone_map:
+        for cone in self.rolling_map.cone_map:
             if cone.hit_count < min_hit_count:
                 continue
 
@@ -517,7 +448,7 @@ class CameraTraj(Node):
                     p2 = all_cones[p2_idx]
                     dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-                    if 2.0 < dist < 8.0:
+                    if self.delaunay_min_distance < dist < self.delaunay_max_distance:
                         midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
 
         if len(midpoints) > 0:
@@ -538,7 +469,7 @@ class CameraTraj(Node):
         num_points = max(int(np.sum(dists) / resolution), 2)
 
         try:
-            tck, _u = spi.splprep([x, y], s=3.0, k=3)
+            tck, _u = spi.splprep([x, y], s=self.spline_smoothing, k=self.spline_degree)
             u_new = np.linspace(0, 1.0, num_points)
             new_x, new_y = spi.splev(u_new, tck)
             return np.vstack((new_x, new_y)).T.tolist()
@@ -598,7 +529,7 @@ class CameraTraj(Node):
                 current_pos = closest_point
 
         # Smoothing and resampling
-        dense_points = self.smooth_and_resample(ordered_points, resolution=0.5)
+        dense_points = self.smooth_and_resample(ordered_points, resolution=self.spline_sampling_resolution)
 
         if len(dense_points) < 3:
             return
@@ -636,7 +567,7 @@ class CameraTraj(Node):
         self.output_publisher.publish(traj_msg)
 
         # Debug
-        if self.trajectory_debug_active:
+        if self.debug_output:
             vis_msg = Marker()
             vis_msg.header = traj_msg.header
             vis_msg.ns = "trajectory"
