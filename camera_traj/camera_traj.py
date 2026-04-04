@@ -145,9 +145,9 @@ class CameraTraj(Node):
         self.get_logger().info(f"  * yolo: {self.yolo_topic}")
         self.get_logger().info("")
         self.get_logger().info(f"  * output: {self.output_topic}")
-        self.get_logger().info("")
 
         if self.debug_output:
+            self.get_logger().info("")
             self.get_logger().info(f"  * rolling map: {self.rolling_map_debug_topic}")
             self.get_logger().info(f"  * trajectory: {self.trajectory_debug_topic}")
 
