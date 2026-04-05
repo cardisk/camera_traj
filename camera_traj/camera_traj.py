@@ -302,7 +302,7 @@ class CameraTraj(Node):
                         x=point_world.point.x, y=point_world.point.y, color=object_class
                     )
 
-                    self.cone_map.add_to_map(new_map_point)
+                    self.rolling_map.add_to_map(new_map_point)
 
                 except Exception as e:
                     self.get_logger().warn(
@@ -328,7 +328,7 @@ class CameraTraj(Node):
             self.rolling_map.cull_map(transform_to_car, self.world_frame)
 
             self.get_logger().info("")
-            self.get_logger().info(f"Map updated, active cones: {len(self.cone_map.cone_map)}")
+            self.get_logger().info(f"Map updated, active cones: {len(self.rolling_map.cone_map)}")
 
             if self.debug_output:
                 self.publish_map_markers()
@@ -351,7 +351,7 @@ class CameraTraj(Node):
         current_count = len(self.rolling_map.cone_map)
 
         # A new Marker for each cone
-        for i, cone in enumerate(self.cone_map.cone_map):
+        for i, cone in enumerate(self.rolling_map.cone_map):
             marker = Marker()
             marker.header.frame_id = self.world_frame
             marker.header.stamp = self.get_clock().now().to_msg()

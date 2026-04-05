@@ -106,6 +106,22 @@ def generate_launch_description():
         }]
     )
 
+    # 2026-04-05: because of a known bug inside zed-ros2-wrapper,
+    # the depth image will have the misspelled frame_id name.
+    # This will create a static identity transformation becuase
+    # the frames are the same but with different names.
+    zed_tf_bridge_node = Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='zed_depth_frame_bridge',
+            arguments=[
+                '0', '0', '0', '0', '0', '0',
+                'zed_left_camera_optical_frame',
+                'zed_left_camera_frame_optical'
+            ],
+            output='screen'
+        )
+
     return LaunchDescription([
         use_sim_time_arg,
         pure_local_trajectory_arg,
@@ -128,5 +144,6 @@ def generate_launch_description():
         spline_sampling_resolution_arg,
         world_frame_arg,
         car_frame_arg,
-        camera_traj_node
+        camera_traj_node,
+        zed_tf_bridge_node
     ])
