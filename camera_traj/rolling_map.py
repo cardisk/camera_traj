@@ -14,6 +14,7 @@ class MapPoint:
     y axis positive at left
 
     color of the cone
+    color_votes is useful in case of missclassifications
     hit_count is the number of times the cone is seen
 
     distance from the ground is ignored
@@ -22,6 +23,7 @@ class MapPoint:
     x: float
     y: float
     color: str
+    color_votes: dict
     hit_count: int = 1
 
 
@@ -38,11 +40,10 @@ class RollingMap:
         best_match = None
 
         for cone in self.cone_map:
-            if cone.color == new_point.color:
-                dist = math.hypot(cone.x - new_point.x, cone.y - new_point.y)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_match = cone
+            dist = math.hypot(cone.x - new_point.x, cone.y - new_point.y)
+            if dist < best_dist:
+                best_dist = dist
+                best_match = cone
 
         if best_match is not None and best_dist <= self.safety_threshold:
             # Exponential Moving Average (EMA) updating
@@ -52,6 +53,8 @@ class RollingMap:
             best_match.y = (self.ema_filter_alpha * best_match.y) + (
                 (1.0 - self.ema_filter_alpha) * new_point.y
             )
+            best_match.color_votes[new_point.color] = best_match.color_votes.get(new_point.color, 0) + 1
+            best_match.color = max(best_match.color_votes, key=best_match.color_votes.get)
             best_match.hit_count += 1
         else:
             self.cone_map.append(new_point)

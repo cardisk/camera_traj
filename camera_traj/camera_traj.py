@@ -299,7 +299,7 @@ class CameraTraj(Node):
                     point_world = do_transform_point(point_cam, transform)
 
                     new_map_point = MapPoint(
-                        x=point_world.point.x, y=point_world.point.y, color=object_class
+                        x=point_world.point.x, y=point_world.point.y, color=object_class, color_votes={}
                     )
 
                     self.rolling_map.add_to_map(new_map_point)

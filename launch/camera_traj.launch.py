@@ -48,16 +48,16 @@ def generate_launch_description():
         'rolling_map_hit_count_threshold', default_value='3')
 
     cull_distance_behind_arg = DeclareLaunchArgument(
-        'cull_distance_behind', default_value='-2.0')
+        'cull_distance_behind', default_value='-1.0')
 
     cull_distance_max_arg = DeclareLaunchArgument(
-        'cull_distance_max', default_value='15.0')
+        'cull_distance_max', default_value='12.0')
 
     delaunay_min_distance_arg = DeclareLaunchArgument(
         'delaunay_min_distance', default_value='2.0')
 
     delaunay_max_distance_arg = DeclareLaunchArgument(
-        'delaunay_max_distance', default_value='8.0')
+        'delaunay_max_distance', default_value='6.0')
 
     spline_smoothing_arg = DeclareLaunchArgument(
         'spline_smoothing', default_value='3.0')
@@ -108,7 +108,7 @@ def generate_launch_description():
 
     # 2026-04-05: because of a known bug inside zed-ros2-wrapper,
     # the depth image will have the misspelled frame_id name.
-    # This will create a static identity transformation becuase
+    # This will create a static identity transformation because
     # the frames are the same but with different names.
     zed_tf_bridge_node = Node(
             package='tf2_ros',
