@@ -58,6 +58,8 @@ class CameraTraj(Node):
         self.declare_parameter("rolling_map_safety_threshold", 1.5)
         self.declare_parameter("rolling_map_ema_filter_alpha", 0.3)
         self.declare_parameter("rolling_map_hit_count_threshold", 3)
+        self.declare_parameter("rolling_map_miss_count_threshold", 5)
+        self.declare_parameter("camera_fov_rad", 1.9)
         self.declare_parameter("cull_distance_behind", -2.0)
         self.declare_parameter("cull_distance_max", 15.0)
         self.declare_parameter("delaunay_min_distance", 2.0)
@@ -77,6 +79,8 @@ class CameraTraj(Node):
         self.rmsth  = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
         self.rmefa  = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
         self.rmhcth = self.get_parameter("rolling_map_hit_count_threshold").get_parameter_value().integer_value
+        self.rmmcth = self.get_parameter("rolling_map_miss_count_threshold").get_parameter_value().integer_value
+        self.rmcfr  = self.get_parameter("camera_fov_rad").get_parameter_value().double_value
 
         self.rmcb   = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
         self.rmcm   = self.get_parameter("cull_distance_max").get_parameter_value().double_value
@@ -107,6 +111,8 @@ class CameraTraj(Node):
         self.rolling_map = RollingMap(
             self.rmsth,
             self.rmefa,
+            self.rmmcth,
+            self.rmcfr,
             self.rmcb,
             self.rmcm
         )
@@ -123,6 +129,9 @@ class CameraTraj(Node):
         self.get_logger().info(f"  * rolling mapping safety threshold: {self.rmsth}m")
         self.get_logger().info(f"  * rolling mapping EMA alpha: {self.rmefa}")
         self.get_logger().info(f"  * rolling mapping hit count threshold: {self.rmhcth}")
+        self.get_logger().info(f"  * rolling mapping miss count threshold: {self.rmmcth}")
+        self.get_logger().info("")
+        self.get_logger().info(f"  * camera FOV radiants: {self.rmcfr}rad")
         self.get_logger().info("")
         self.get_logger().info(f"  * rolling mapping cull distance behind car: {self.rmcb}m")
         self.get_logger().info(f"  * rolling mapping cull distance ahead car: {self.rmcm}m")
@@ -214,6 +223,8 @@ class CameraTraj(Node):
 
         if self.pure_local_trajectory:
             self.rolling_map.cone_map.clear()
+
+        self.rolling_map.prepare_update()
 
         for det in yolo:
             object_class = det["color"]
@@ -325,6 +336,7 @@ class CameraTraj(Node):
             )
 
             # Cleaning the map
+            self.rolling_map.apply_decay(transform_to_car)
             self.rolling_map.cull_map(transform_to_car, self.world_frame)
 
             self.get_logger().info("")

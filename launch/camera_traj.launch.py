@@ -42,10 +42,16 @@ def generate_launch_description():
         'rolling_map_safety_threshold', default_value='1.5')
 
     rolling_map_ema_filter_alpha_arg = DeclareLaunchArgument(
-        'rolling_map_ema_filter_alpha', default_value='0.3')
+        'rolling_map_ema_filter_alpha', default_value='0.4')
 
     rolling_map_hit_count_threshold_arg = DeclareLaunchArgument(
-        'rolling_map_hit_count_threshold', default_value='3')
+        'rolling_map_hit_count_threshold', default_value='2')
+
+    rolling_map_miss_count_threshold_arg = DeclareLaunchArgument(
+        'rolling_map_miss_count_threshold', default_value='3')
+
+    camera_fov_rad_arg = DeclareLaunchArgument(
+        'camera_fov_rad', default_value='1.9')
 
     cull_distance_behind_arg = DeclareLaunchArgument(
         'cull_distance_behind', default_value='-1.0')
@@ -82,27 +88,29 @@ def generate_launch_description():
         output='screen',
         respawn=True,
         parameters=[{
-            'use_sim_time':                    LaunchConfiguration('use_sim_time'),
-            'pure_local_trajectory':           LaunchConfiguration('pure_local_trajectory'),
-            'debug_output':                    LaunchConfiguration('debug_output'),
-            'depth_topic':                     LaunchConfiguration('depth_topic'),
-            'camera_info_topic':               LaunchConfiguration('camera_info_topic'),
-            'yolo_topic':                      LaunchConfiguration('yolo_topic'),
-            'rolling_map_debug_topic':         LaunchConfiguration('rolling_map_debug_topic'),
-            'trajectory_debug_topic':          LaunchConfiguration('trajectory_debug_topic'),
-            'output_topic':                    LaunchConfiguration('output_topic'),
-            'rolling_map_safety_threshold':    LaunchConfiguration('rolling_map_safety_threshold'),
-            'rolling_map_ema_filter_alpha':    LaunchConfiguration('rolling_map_ema_filter_alpha'),
-            'rolling_map_hit_count_threshold': LaunchConfiguration('rolling_map_hit_count_threshold'),
-            'cull_distance_behind':            LaunchConfiguration('cull_distance_behind'),
-            'cull_distance_max':               LaunchConfiguration('cull_distance_max'),
-            'delaunay_min_distance':           LaunchConfiguration('delaunay_min_distance'),
-            'delaunay_max_distance':           LaunchConfiguration('delaunay_max_distance'),
-            'spline_smoothing':                LaunchConfiguration('spline_smoothing'),
-            'spline_degree':                   LaunchConfiguration('spline_degree'),
-            'spline_sampling_resolution':      LaunchConfiguration('spline_sampling_resolution'),
-            'world_frame':                     LaunchConfiguration('world_frame'),
-            'car_frame':                       LaunchConfiguration('car_frame'),
+            'use_sim_time':                     LaunchConfiguration('use_sim_time'),
+            'pure_local_trajectory':            LaunchConfiguration('pure_local_trajectory'),
+            'debug_output':                     LaunchConfiguration('debug_output'),
+            'depth_topic':                      LaunchConfiguration('depth_topic'),
+            'camera_info_topic':                LaunchConfiguration('camera_info_topic'),
+            'yolo_topic':                       LaunchConfiguration('yolo_topic'),
+            'rolling_map_debug_topic':          LaunchConfiguration('rolling_map_debug_topic'),
+            'trajectory_debug_topic':           LaunchConfiguration('trajectory_debug_topic'),
+            'output_topic':                     LaunchConfiguration('output_topic'),
+            'rolling_map_safety_threshold':     LaunchConfiguration('rolling_map_safety_threshold'),
+            'rolling_map_ema_filter_alpha':     LaunchConfiguration('rolling_map_ema_filter_alpha'),
+            'rolling_map_hit_count_threshold':  LaunchConfiguration('rolling_map_hit_count_threshold'),
+            'rolling_map_miss_count_threshold': LaunchConfiguration('rolling_map_miss_count_threshold'),
+            'camera_fov_rad':                   LaunchConfiguration('camera_fov_rad'),
+            'cull_distance_behind':             LaunchConfiguration('cull_distance_behind'),
+            'cull_distance_max':                LaunchConfiguration('cull_distance_max'),
+            'delaunay_min_distance':            LaunchConfiguration('delaunay_min_distance'),
+            'delaunay_max_distance':            LaunchConfiguration('delaunay_max_distance'),
+            'spline_smoothing':                 LaunchConfiguration('spline_smoothing'),
+            'spline_degree':                    LaunchConfiguration('spline_degree'),
+            'spline_sampling_resolution':       LaunchConfiguration('spline_sampling_resolution'),
+            'world_frame':                      LaunchConfiguration('world_frame'),
+            'car_frame':                        LaunchConfiguration('car_frame'),
         }]
     )
 
@@ -135,6 +143,8 @@ def generate_launch_description():
         rolling_map_safety_threshold_arg,
         rolling_map_ema_filter_alpha_arg,
         rolling_map_hit_count_threshold_arg,
+        rolling_map_miss_count_threshold_arg,
+        camera_fov_rad_arg,
         cull_distance_behind_arg,
         cull_distance_max_arg,
         delaunay_min_distance_arg,
