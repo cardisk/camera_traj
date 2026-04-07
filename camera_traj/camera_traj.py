@@ -345,18 +345,18 @@ class CameraTraj(Node):
             if self.debug_output:
                 self.publish_map_markers()
 
+            midpoints = self.calculate_centerline(self.rmhcth, transform_to_car)
+            midpoints_len = len(midpoints)
+
+            if midpoints_len > 0:
+                self.publish_trajectory(midpoints, transform_to_car)
+
+            else:
+                self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
+
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
             return
-
-        midpoints = self.calculate_centerline(self.rmhcth)
-        midpoints_len = len(midpoints)
-
-        if midpoints_len > 0:
-            self.publish_trajectory(midpoints, transform_to_car)
-
-        else:
-            self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
 
     def publish_map_markers(self):
         marker_array = MarkerArray()
@@ -380,9 +380,14 @@ class CameraTraj(Node):
             # Standard orientation
             marker.pose.orientation.w = 1.0
 
-            marker.scale.x = 0.2
-            marker.scale.y = 0.2
-            marker.scale.z = 0.3
+            if cone.color == "large_orange_cone":
+                marker.scale.x = 0.4
+                marker.scale.y = 0.4
+                marker.scale.z = 0.3
+            else:
+                marker.scale.x = 0.2
+                marker.scale.y = 0.2
+                marker.scale.z = 0.3
 
             color = ColorRGBA(a=1.0)
 
@@ -392,11 +397,9 @@ class CameraTraj(Node):
                 color.r = 1.0
                 color.g = 1.0
             elif cone.color == "orange_cone":
-                color.r = 0.8
-                color.g = 0.5
+                color.r = 1.0
             elif cone.color == "large_orange_cone":
                 color.r = 1.0
-                color.g = 0.1
             else:
                 color.r = 1.0
                 color.g = 1.0
@@ -417,7 +420,7 @@ class CameraTraj(Node):
         self.previous_marker_count = current_count
         self.rolling_map_marker_pub.publish(marker_array)
 
-    def calculate_centerline(self, min_hit_count):
+    def calculate_centerline(self, min_hit_count, transform_to_car):
         left_cones = []
         right_cones = []
 
@@ -432,7 +435,15 @@ class CameraTraj(Node):
                 right_cones.append([cone.x, cone.y])
 
             elif cone.color in ["orange_cone", "large_orange_cone"]:
-                if cone.y > 0.0:  # Positive Y = Left (REP 103)
+                p_world = PointStamped()
+                p_world.header.frame_id = self.world_frame
+                p_world.point.x = cone.x
+                p_world.point.y = cone.y
+                p_world.point.z = 0.0
+
+                p_local = do_transform_point(p_world, transform_to_car)
+
+                if p_local.point.y > 0.0:  # Positive Y = Left (REP 103)
                     left_cones.append([cone.x, cone.y])
 
                 else:
