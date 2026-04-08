@@ -25,33 +25,6 @@ from tf2_ros import Buffer, TransformListener
 
 from .rolling_map import MapPoint, RollingMap
 
-# With this solution technically it's possible to find different
-# solutions and quickly swap them between runs
-ROS_PARAMETERS = {
-    "use_sim_time": False,
-    "pure_local_trajectory": False,
-    "debug_output": True,
-    "depth_topic": "/zed/zed_node/depth/depth_registered",
-    "yolo_topic": "/cone_detection/output",
-    "camera_info_topic": "/zed/zed_node/depth/camera_info",
-    "rolling_map_debug_topic": "/camera_traj/debug/rolling_map",
-    "trajectory_debug_topic": "/camera_traj/debug/trajectory",
-    "output_topic": "/camera_traj/output",
-    "rolling_map_safety_threshold": 1.5,
-    "rolling_map_ema_filter_alpha": 0.3,
-    "rolling_map_hit_count_threshold": 3,
-    "rolling_map_miss_count_threshold": 5,
-    "camera_fov_rad": 1.9,
-    "cull_distance_behind": -2.0,
-    "cull_distance_max": 15.0,
-    "delaunay_min_distance": 2.0,
-    "delaunay_max_distance": 8.0,
-    "spline_smoothing": 3.0,
-    "spline_degree": 3,
-    "spline_sampling_resolution": 0.5,
-    "world_frame": "map",
-    "car_frame": "zed_camera_link"
-}
 
 class CameraTraj(Node):
     """
@@ -60,7 +33,11 @@ class CameraTraj(Node):
     """
 
     def __init__(self):
-        super().__init__("CameraTraj")
+        super().__init__(
+            "CameraTraj",
+            allow_undeclared_parameters=True,
+            automatically_declare_parameters_from_overrides=True
+        )
 
         # Class fields
         self.bridge = CvBridge()
@@ -70,14 +47,10 @@ class CameraTraj(Node):
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
         # Declaring parameters
-        self.p = {}
-        for name, default_val in ROS_PARAMETERS.items():
-            # Already defined by default
-            if name == "use_sim_time":
-                self.p[name] = self.get_parameter(name).value
-                continue
-
-            self.p[name] = self.declare_parameter(name, default_val).value
+        self.p = {
+            name: param.value
+            for name, param in self.get_parameters_by_prefix('').items()
+        }
 
         # Flags
         self.use_sim_time          = self.p["use_sim_time"]
