@@ -25,6 +25,33 @@ from tf2_ros import Buffer, TransformListener
 
 from .rolling_map import MapPoint, RollingMap
 
+# With this solution technically it's possible to find different
+# solutions and quickly swap them between runs
+ROS_PARAMETERS = {
+    "use_sim_time": False,
+    "pure_local_trajectory": False,
+    "debug_output": True,
+    "depth_topic": "/zed/zed_node/depth/depth_registered",
+    "yolo_topic": "/cone_detection/output",
+    "camera_info_topic": "/zed/zed_node/depth/camera_info",
+    "rolling_map_debug_topic": "/camera_traj/debug/rolling_map",
+    "trajectory_debug_topic": "/camera_traj/debug/trajectory",
+    "output_topic": "/camera_traj/output",
+    "rolling_map_safety_threshold": 1.5,
+    "rolling_map_ema_filter_alpha": 0.3,
+    "rolling_map_hit_count_threshold": 3,
+    "rolling_map_miss_count_threshold": 5,
+    "camera_fov_rad": 1.9,
+    "cull_distance_behind": -2.0,
+    "cull_distance_max": 15.0,
+    "delaunay_min_distance": 2.0,
+    "delaunay_max_distance": 8.0,
+    "spline_smoothing": 3.0,
+    "spline_degree": 3,
+    "spline_sampling_resolution": 0.5,
+    "world_frame": "map",
+    "car_frame": "zed_camera_link"
+}
 
 class CameraTraj(Node):
     """
@@ -42,66 +69,48 @@ class CameraTraj(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
-        # ROS2 parameters
+        # Declaring parameters
+        self.p = {}
+        for name, default_val in ROS_PARAMETERS.items():
+            # Already defined by default
+            if name == "use_sim_time":
+                self.p[name] = self.get_parameter(name).value
+                continue
 
-        # Do not need this because it's a special parameter declared by default
-        # self.declare_parameter("use_sim_time", "False")
-        self.declare_parameter("pure_local_trajectory", False)
-        self.declare_parameter("debug_output", True)
-
-        self.declare_parameter("depth_topic", "/zed/zed_node/depth/depth_registered")
-        self.declare_parameter("yolo_topic", "/cone_detection/output")
-        self.declare_parameter("camera_info_topic", "/zed/zed_node/depth/camera_info")
-        self.declare_parameter("rolling_map_debug_topic", "/camera_traj/debug/rolling_map")
-        self.declare_parameter("trajectory_debug_topic", "/camera_traj/debug/trajectory")
-        self.declare_parameter("output_topic", "/camera_traj/output")
-        self.declare_parameter("rolling_map_safety_threshold", 1.5)
-        self.declare_parameter("rolling_map_ema_filter_alpha", 0.3)
-        self.declare_parameter("rolling_map_hit_count_threshold", 3)
-        self.declare_parameter("rolling_map_miss_count_threshold", 5)
-        self.declare_parameter("camera_fov_rad", 1.9)
-        self.declare_parameter("cull_distance_behind", -2.0)
-        self.declare_parameter("cull_distance_max", 15.0)
-        self.declare_parameter("delaunay_min_distance", 2.0)
-        self.declare_parameter("delaunay_max_distance", 8.0)
-        self.declare_parameter("spline_smoothing", 3.0)
-        self.declare_parameter("spline_degree", 3)
-        self.declare_parameter("spline_sampling_resolution", 0.5)
-        self.declare_parameter("world_frame", "map")
-        self.declare_parameter("car_frame", "zed_camera_link")
+            self.p[name] = self.declare_parameter(name, default_val).value
 
         # Flags
-        self.use_sim_time          = self.get_parameter("use_sim_time").get_parameter_value().bool_value
-        self.pure_local_trajectory = self.get_parameter("pure_local_trajectory").get_parameter_value().bool_value
-        self.debug_output          = self.get_parameter("debug_output").get_parameter_value().bool_value
+        self.use_sim_time          = self.p["use_sim_time"]
+        self.pure_local_trajectory = self.p["pure_local_trajectory"]
+        self.debug_output          = self.p["debug_output"]
 
         # Settings
-        self.rmsth  = self.get_parameter("rolling_map_safety_threshold").get_parameter_value().double_value
-        self.rmefa  = self.get_parameter("rolling_map_ema_filter_alpha").get_parameter_value().double_value
-        self.rmhcth = self.get_parameter("rolling_map_hit_count_threshold").get_parameter_value().integer_value
-        self.rmmcth = self.get_parameter("rolling_map_miss_count_threshold").get_parameter_value().integer_value
-        self.rmcfr  = self.get_parameter("camera_fov_rad").get_parameter_value().double_value
+        self.rmsth  = self.p["rolling_map_safety_threshold"]
+        self.rmefa  = self.p["rolling_map_ema_filter_alpha"]
+        self.rmhcth = self.p["rolling_map_hit_count_threshold"]
+        self.rmmcth = self.p["rolling_map_miss_count_threshold"]
+        self.rmcfr  = self.p["camera_fov_rad"]
 
-        self.rmcb   = self.get_parameter("cull_distance_behind").get_parameter_value().double_value
-        self.rmcm   = self.get_parameter("cull_distance_max").get_parameter_value().double_value
+        self.rmcb   = self.p["cull_distance_behind"]
+        self.rmcm   = self.p["cull_distance_max"]
 
-        self.delaunay_min_distance = self.get_parameter("delaunay_min_distance").get_parameter_value().double_value
-        self.delaunay_max_distance = self.get_parameter("delaunay_max_distance").get_parameter_value().double_value
+        self.delaunay_min_distance = self.p["delaunay_min_distance"]
+        self.delaunay_max_distance = self.p["delaunay_max_distance"]
 
-        self.spline_smoothing           = self.get_parameter("spline_smoothing").get_parameter_value().double_value
-        self.spline_degree              = self.get_parameter("spline_degree").get_parameter_value().integer_value
-        self.spline_sampling_resolution = self.get_parameter("spline_sampling_resolution").get_parameter_value().double_value
+        self.spline_smoothing           = self.p["spline_smoothing"]
+        self.spline_degree              = self.p["spline_degree"]
+        self.spline_sampling_resolution = self.p["spline_sampling_resolution"]
 
-        self.car_frame   = self.get_parameter("car_frame").get_parameter_value().string_value
-        self.world_frame = self.get_parameter("world_frame").get_parameter_value().string_value
+        self.car_frame   = self.p["car_frame"]
+        self.world_frame = self.p["world_frame"]
 
         # Topics
-        self.depth_topic             = self.get_parameter("depth_topic").get_parameter_value().string_value
-        self.yolo_topic              = self.get_parameter("yolo_topic").get_parameter_value().string_value
-        self.camera_info_topic       = self.get_parameter("camera_info_topic").get_parameter_value().string_value
-        self.rolling_map_debug_topic = self.get_parameter("rolling_map_debug_topic").get_parameter_value().string_value
-        self.trajectory_debug_topic  = self.get_parameter("trajectory_debug_topic").get_parameter_value().string_value
-        self.output_topic            = self.get_parameter("output_topic").get_parameter_value().string_value
+        self.depth_topic             = self.p["depth_topic"]
+        self.yolo_topic              = self.p["yolo_topic"]
+        self.camera_info_topic       = self.p["camera_info_topic"]
+        self.rolling_map_debug_topic = self.p["rolling_map_debug_topic"]
+        self.trajectory_debug_topic  = self.p["trajectory_debug_topic"]
+        self.output_topic            = self.p["output_topic"]
 
         if self.pure_local_trajectory:
             self.rmhcth = 1
