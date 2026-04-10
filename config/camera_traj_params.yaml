@@ -15,15 +15,15 @@ camera_traj:
 
     # Settings
     rolling_map_safety_threshold: 1.5
-    rolling_map_ema_filter_alpha: 0.3
-    rolling_map_hit_count_threshold: 3
-    rolling_map_miss_count_threshold: 5
+    rolling_map_ema_filter_alpha: 0.4
+    rolling_map_hit_count_threshold: 2
+    rolling_map_miss_count_threshold: 3
     camera_fov_rad: 1.9
     cull_distance_behind: -2.0
-    cull_distance_max: 15.0
+    cull_distance_max: 12.0
 
     delaunay_min_distance: 2.0
-    delaunay_max_distance: 8.0
+    delaunay_max_distance: 6.0
 
     spline_smoothing: 3.0
     spline_degree: 3
