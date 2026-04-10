@@ -82,16 +82,16 @@ def generate_launch_description():
     # This will create a static identity transformation because
     # the frames are the same but with different names.
     zed_tf_bridge_node = Node(
-            package='tf2_ros',
-            executable='static_transform_publisher',
-            name='zed_depth_frame_bridge',
-            arguments=[
-                '0', '0', '0', '0', '0', '0',
-                'zed_left_camera_optical_frame',
-                'zed_left_camera_frame_optical'
-            ],
-            output='screen'
-        )
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        name='zed_depth_frame_bridge',
+        arguments=[
+            '0', '0', '0', '0', '0', '0',
+            'zed_left_camera_optical_frame',
+            'zed_left_camera_frame_optical'
+        ],
+        output='screen'
+    )
 
     return LaunchDescription(
         dyn_launch_args + [
