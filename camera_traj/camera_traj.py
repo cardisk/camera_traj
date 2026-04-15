@@ -250,32 +250,19 @@ class CameraTraj(Node):
             # [IMPORTANT] the points used here are not the ones associated
             # with the real z depth. This can be a source of issues
             point2d     = prc.Point2D((bb.p1.x + bb.p2.x) / 2, bb.p2.y)
-            point3d_opt = prc.project_point_into_3d_optical_frame(point2d, distance, self.camera_info)
-
-            # Crafting the PointStamped to do the transformation
-            point_cam = PointStamped()
-
-            # [IMPORTANT] frame_id and timestamp must be the same as the depth image
-            point_cam.header.frame_id = depth_msg.header.frame_id
-            point_cam.header.stamp = depth_msg.header.stamp
-            point_cam.point.x = point3d_opt.x
-            point_cam.point.y = point3d_opt.y
-            point_cam.point.z = point3d_opt.z
+            point3d_opt = prc.project_point2d_into_3d_optical_frame(point2d, distance, self.camera_info)
 
             try:
-                # Kindly asking to the TF2 package to transform the point
-                # - lookup_transform(target_frame, source_frame, timeout)
-                transform = self.tf_buffer.lookup_transform(
-                    self.world_frame,
-                    point_cam.header.frame_id,
-                    rclpy.time.Time(),  # get the latest transformation
-                    rclpy.duration.Duration(seconds=0.2)
+                point3d_world = prc.transform_point3d(
+                    self.tf_buffer,
+                    point3d_opt,
+                    depth_msg.header.stamp,
+                    depth_msg.header.frame_id,
+                    self.world_frame
                 )
 
-                point_world = do_transform_point(point_cam, transform)
-
                 new_map_point = MapPoint(
-                    x=point_world.point.x, y=point_world.point.y, color=bb.color, color_votes={}
+                    x=point3d_world.x, y=point3d_world.y, color=bb.color, color_votes={}
                 )
 
                 self.rolling_map.add_to_map(new_map_point)
