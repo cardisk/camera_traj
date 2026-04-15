@@ -24,6 +24,7 @@ from tf2_geometry_msgs import do_transform_point
 from tf2_ros import Buffer, TransformListener
 
 from .rolling_map import MapPoint, RollingMap
+from . import perception as prc
 
 
 class CameraTraj(Node):
@@ -182,7 +183,15 @@ class CameraTraj(Node):
 
     def info_callback(self, camera_info_msg):
         if self.camera_info is None:
-            self.camera_info = camera_info_msg
+            # Intrinsic camera matrix for the raw (distorted) images.
+            #     [fx  0 cx]
+            # K = [ 0 fy cy]
+            #     [ 0  0  1]
+            # Projects 3D points in the camera coordinate frame to 2D pixel
+            # coordinates using the focal lengths (fx, fy) and principal point
+            # (cx, cy).
+            k = camera_info_msg.k
+            self.camera_info = prc.CameraInfo(k[0], k[4], k[2], k[5])
             self.get_logger().info("")
             self.get_logger().info("Camera Intrinsics received!")
 
@@ -209,102 +218,71 @@ class CameraTraj(Node):
         self.rolling_map.prepare_update()
 
         for det in yolo:
-            object_class = det["color"]
+            distance = 0
 
-            xmin, ymin = det["BB"][0]
-            xmax, ymax = det["BB"][1]
+            try:
+                bb = prc.bounding_box_from_detection(det, width, height)
+                patched_bb = prc.patched_bounding_box_from_detection(det, width, height)
 
-            # Clamping the BB if at the image borders
-            xmin = max(0, int(xmin))
-            ymin = max(0, int(ymin))
-            xmax = min(width, int(xmax))
-            ymax = min(height, int(ymax))
+                depth_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
+                depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, patched_bb)
 
-            if xmin >= xmax or ymin >= ymax:
-                self.get_logger().warn(f"Invalid bounding box for {object_class}")
+                if depth_bb.size > 0 and depth_patched_bb.size > 0:
+                    distance += prc.get_bimodal_distance(depth_bb)
+                    distance += prc.get_median_distance(depth_patched_bb)
+                    distance = distance / 2
+
+                elif depth_bb.size > 0:
+                    distance = prc.get_median_distance(depth_patched_bb)
+
+                elif depth_patched_bb.size > 0:
+                    distance = prc.get_bimodal_distance(depth_bb)
+
+                else:
+                    self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
+                    continue
+
+            except Exception as e:
+                self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
                 continue
 
-            # BB size
-            w = xmax - xmin
-            h = ymax - ymin
+            # Bottom center point inside the BB
+            # [IMPORTANT] the points used here are not the ones associated
+            # with the real z depth. This can be a source of issues
+            point2d     = prc.Point2D((bb.p1.x + bb.p2.x) / 2, bb.p2.y)
+            point3d_opt = prc.project_point_into_3d_optical_frame(point2d, distance, self.camera_info)
 
-            if w < 5 or h < 5:
-                self.get_logger().warn(f"Bounding box too small for {object_class}")
-                continue
+            # Crafting the PointStamped to do the transformation
+            point_cam = PointStamped()
 
-            # BB resizing
-            patch_xmin = int(xmin + (w * 0.25))
-            patch_xmax = int(xmax - (w * 0.25))
-            patch_ymin = int(ymin + (h * 0.50))
-            patch_ymax = int(ymax - (h * 0.05))
+            # [IMPORTANT] frame_id and timestamp must be the same as the depth image
+            point_cam.header.frame_id = depth_msg.header.frame_id
+            point_cam.header.stamp = depth_msg.header.stamp
+            point_cam.point.x = point3d_opt.x
+            point_cam.point.y = point3d_opt.y
+            point_cam.point.z = point3d_opt.z
 
-            patch_xmin = max(0, min(patch_xmin, width - 1))
-            patch_xmax = max(patch_xmin + 1, min(patch_xmax, width))
-            patch_ymin = max(0, min(patch_ymin, height - 1))
-            patch_ymax = max(patch_ymin + 1, min(patch_ymax, height))
+            try:
+                # Kindly asking to the TF2 package to transform the point
+                # - lookup_transform(target_frame, source_frame, timeout)
+                transform = self.tf_buffer.lookup_transform(
+                    self.world_frame,
+                    point_cam.header.frame_id,
+                    rclpy.time.Time(),  # get the latest transformation
+                    rclpy.duration.Duration(seconds=0.2)
+                )
 
-            # Using the BB as a mask over the depth
-            depth_roi = depth_array[patch_ymin:patch_ymax, patch_xmin:patch_xmax]
-            valid_depths = depth_roi[
-                ~np.isnan(depth_roi) & ~np.isinf(depth_roi) & (depth_roi > 0.0)
-            ]
+                point_world = do_transform_point(point_cam, transform)
 
-            if valid_depths.size > 0:
-                # Using the percentiles to extract depth information
-                # 50% is the median, it should remove the noise
-                distance = float(np.percentile(valid_depths, 50))
+                new_map_point = MapPoint(
+                    x=point_world.point.x, y=point_world.point.y, color=bb.color, color_votes={}
+                )
 
-                # Bottom center point inside the resiczed BB
-                u_pixel = int((xmin + xmax) / 2)
-                v_pixel = int(ymax)
+                self.rolling_map.add_to_map(new_map_point)
 
-                # Camera intrinsics
-                fx = self.camera_info.k[0]
-                fy = self.camera_info.k[4]
-                cx = self.camera_info.k[2]
-                cy = self.camera_info.k[5]
-
-                # 3D point inside optical frame
-                x_opt = (u_pixel - cx) * distance / fx
-                y_opt = (v_pixel - cy) * distance / fy
-                z_opt = distance
-
-                # Crafting the PointStamped to do the transformation
-                point_cam = PointStamped()
-
-                # [IMPORTANT] frame_id and timestamp must be the same as the depth image
-                point_cam.header.frame_id = depth_msg.header.frame_id
-                point_cam.header.stamp = depth_msg.header.stamp
-                point_cam.point.x = x_opt
-                point_cam.point.y = y_opt
-                point_cam.point.z = z_opt
-
-                try:
-                    # Kindly asking to the TF2 package to transform the point
-                    # - lookup_transform(target_frame, source_frame, timeout)
-                    transform = self.tf_buffer.lookup_transform(
-                        self.world_frame,
-                        point_cam.header.frame_id,
-                        rclpy.time.Time(),  # get the latest transformation
-                        rclpy.duration.Duration(seconds=0.2)
-                    )
-
-                    point_world = do_transform_point(point_cam, transform)
-
-                    new_map_point = MapPoint(
-                        x=point_world.point.x, y=point_world.point.y, color=object_class, color_votes={}
-                    )
-
-                    self.rolling_map.add_to_map(new_map_point)
-
-                except Exception as e:
-                    self.get_logger().warn(
-                        f"Could not transform in {self.world_frame}: {e}"
-                    )
-
-            else:
-                self.get_logger().info(
-                    f"Detected {object_class}, but depth is invalid."
+            except Exception as e:
+                self.get_logger().warn(
+                    f"Could not transform in {self.world_frame}: {e}"
                 )
 
         try:
