@@ -254,14 +254,14 @@ class CameraTraj(Node):
 
                 case "patching":
                     try:
-                        patched_bb = prc.patched_bounding_box_from_detection(det, width, height)
+                        bb = prc.patched_bounding_box_from_detection(det, width, height)
 
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
                         continue
 
                     try:
-                        depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, patched_bb)
+                        depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
 
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid Depth BoundingBox: {e}")
@@ -272,7 +272,7 @@ class CameraTraj(Node):
                             distance = prc.get_median_distance(depth_patched_bb)
 
                         else:
-                            self.get_logger().warn(f"Detected {patched_bb.color} but could not get any depth data")
+                            self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
                             continue
 
                     except Exception as e:
