@@ -22,7 +22,7 @@ camera_traj:
     rolling_map_miss_count_threshold: 3
     camera_fov_rad: 1.9
     cull_distance_behind: -2.5
-    cull_distance_max: 12.0
+    cull_distance_max: 15.0
 
     delaunay_min_distance: 2.0
     delaunay_max_distance: 6.0
