@@ -7,6 +7,8 @@
 [ ] Ignora i coni arancioni grossi e trova direttamente il middlepoint fra loro
 [ ] Skidpad, localizzare la traiettoria globale e poi fare delaunay. Selezionare midpoints più vicini a globale
 
+[ ] Provare ad invertire NN dato da gemini confrontando la riga con tutti i coni arancioni
+
 ### Testing
 [ ] Performance ~14Hz
 [ ] Simulatore FSDS(?)
