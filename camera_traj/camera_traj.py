@@ -96,6 +96,7 @@ class CameraTraj(Node):
         self.rolling_map = RollingMap(
             self.rmsth,
             self.rmefa,
+            self.rmhcth,
             self.rmmcth,
             self.rmcfr,
             self.rmcb,
@@ -433,6 +434,9 @@ class CameraTraj(Node):
                     right_cones.append([cone.x, cone.y])
 
         if len(left_cones) < 1 or len(right_cones) < 1:
+            return []
+
+        if len(left_cones) < 3 and len(right_cones) < 3:
             return []
 
         all_cones = np.array(left_cones + right_cones)

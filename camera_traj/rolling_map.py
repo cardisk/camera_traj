@@ -32,10 +32,11 @@ class MapPoint:
 
 
 class RollingMap:
-    def __init__(self, rmsth, efa, rmmth, cfr, rmcb, rmcm):
+    def __init__(self, rmsth, efa, rmhth, rmmth, cfr, rmcb, rmcm):
         self.safety_threshold: float = rmsth
         self.cone_map: list[MapPoint] = []
         self.ema_filter_alpha = efa
+        self.cone_hit_th = rmhth
         self.cone_miss_th = rmmth
         self.camera_fov_rad = cfr
         self.cull_behind_th = rmcb

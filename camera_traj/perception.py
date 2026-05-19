@@ -6,25 +6,14 @@ import rclpy
 from geometry_msgs.msg import PointStamped
 from tf2_geometry_msgs import do_transform_point
 
+from .geometry import Point2D, Point3D
+
 @dataclass
 class CameraInfo:
     fx: float
     fy: float
     cx: float
     cy: float
-
-
-@dataclass
-class Point2D:
-    x: float
-    y: float
-
-
-@dataclass
-class Point3D:
-    x: float
-    y: float
-    z: float
 
 
 def project_point2d_into_3d_optical_frame(point2d, depth, camera_info):
