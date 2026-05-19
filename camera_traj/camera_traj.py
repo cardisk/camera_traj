@@ -59,6 +59,8 @@ class CameraTraj(Node):
         self.debug_output          = self.p["debug_output"]
 
         # Settings
+        self.depth_extraction_algorithm = str(self.p["depth_extraction_algorithm"]).lower()
+
         self.rmsth  = self.p["rolling_map_safety_threshold"]
         self.rmefa  = self.p["rolling_map_ema_filter_alpha"]
         self.rmhcth = self.p["rolling_map_hit_count_threshold"]
@@ -109,6 +111,8 @@ class CameraTraj(Node):
         self.get_logger().info("")
 
         self.get_logger().info("- Settings --------------------------------------------------------------")
+        self.get_logger().info(f"  * depth_extraction_algorithm: {self.depth_extraction_algorithm}")
+        self.get_logger().info("")
         self.get_logger().info(f"  * rolling mapping safety threshold: {self.rmsth}m")
         self.get_logger().info(f"  * rolling mapping EMA alpha: {self.rmefa}")
         self.get_logger().info(f"  * rolling mapping hit count threshold: {self.rmhcth}")
@@ -220,31 +224,63 @@ class CameraTraj(Node):
         for det in yolo:
             distance = 0
 
-            try:
-                bb = prc.bounding_box_from_detection(det, width, height)
-                patched_bb = prc.patched_bounding_box_from_detection(det, width, height)
+            match self.depth_extraction_algorithm:
+                case "bimodal":
+                    try:
+                        bb = prc.bounding_box_from_detection(det, width, height)
 
-                depth_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
-                depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, patched_bb)
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
+                        continue
 
-                if depth_bb.size > 0 and depth_patched_bb.size > 0:
-                    distance += prc.get_bimodal_distance(depth_bb)
-                    distance += prc.get_median_distance(depth_patched_bb)
-                    distance = distance / 2
+                    try:
+                        depth_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
 
-                elif depth_bb.size > 0:
-                    distance = prc.get_median_distance(depth_patched_bb)
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid Depth BoundingBox: {e}")
+                        continue
 
-                elif depth_patched_bb.size > 0:
-                    distance = prc.get_bimodal_distance(depth_bb)
+                    try:
+                        if depth_bb.size > 0:
+                            distance = prc.get_bimodal_distance(depth_bb)
 
-                else:
-                    self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
-                    continue
+                        else:
+                            self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
+                            continue
 
-            except Exception as e:
-                self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
-                continue
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid Depth distance: {e}")
+                        continue
+
+                case "patching":
+                    try:
+                        patched_bb = prc.patched_bounding_box_from_detection(det, width, height)
+
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
+                        continue
+
+                    try:
+                        depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, patched_bb)
+
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid Depth BoundingBox: {e}")
+                        continue
+
+                    try:
+                        if depth_patched_bb.size > 0:
+                            distance = prc.get_median_distance(depth_patched_bb)
+
+                        else:
+                            self.get_logger().warn(f"Detected {patched_bb.color} but could not get any depth data")
+                            continue
+
+                    except Exception as e:
+                        self.get_logger().warn(f"Could not get a valid Depth distance: {e}")
+                        continue
+
+                case _:
+                    raise Exception(f"Invalid depth extration algorithm: {self.depth_extraction_algorithm}")
 
             # Bottom center point inside the BB
             # [IMPORTANT] the points used here are not the ones associated

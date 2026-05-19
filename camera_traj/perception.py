@@ -27,7 +27,7 @@ class Point3D:
     z: float
 
 
-def project_point2d_into_3d_optical_frame(point2d, depth, camera_info)
+def project_point2d_into_3d_optical_frame(point2d, depth, camera_info):
     x_opt = (point2d.x - camera_info.cx) * depth / camera_info.fx
     y_opt = (point2d.y - camera_info.cy) * depth / camera_info.fy
     z_opt = depth
@@ -117,9 +117,6 @@ def get_masked_depth_for_bounding_box(depth_img, bb):
 
 
 def get_bimodal_distance(data, iterations=5):
-    if data.size < 10:
-        return np.nan
-
     # The two ends of the distribution
     mu1 = np.min(data)
     mu2 = np.max(data)
