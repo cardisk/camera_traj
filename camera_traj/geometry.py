@@ -2,7 +2,7 @@ import math
 
 from dataclasses import dataclass
 
-from .rolling_map import MapPoint, RollingMap
+from .rolling_map import RollingMap
 
 
 @dataclass
@@ -21,8 +21,8 @@ class Point3D:
 class Track:
     left_cones: list[Point2D] = []
     right_cones: list[Point2D] = []
-    # orange_cones: list[Point2D] = []
-    # large_orange_cones: list[Point2D] = []
+    orange_cones: list[Point2D] = []
+    large_orange_cones: list[Point2D] = []
     unordered_midpoints: list[Point2D] = []
 
 
@@ -50,8 +50,14 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
     return track
 
 
-def find_midline_inside_track(track: Track):
-    pass
+# Points must be already ordered
+def find_midline_inside_track(track: Track, is_starting: bool = False) -> list[Point2D]:
+    return []
+
+
+def smooth_midline_with_spline(waypoints: list[Point2D]) -> list[Point2D]:
+    return []
+
 
 def calculate_centerline(self, min_hit_count, transform_to_car):
     left_cones = []

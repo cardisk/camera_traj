@@ -25,6 +25,7 @@ from tf2_ros import Buffer, TransformListener
 
 from .rolling_map import MapPoint, RollingMap
 from . import perception as prc
+from . import geometry as geom
 
 
 class CameraTraj(Node):
@@ -328,6 +329,20 @@ class CameraTraj(Node):
 
             if self.debug_output:
                 self.publish_map_markers()
+
+            ############################
+
+            track = geom.find_track_inside_map(self.rolling_map)
+
+            if self.debug_output:
+                self.publish_track()
+
+            waypoints = geom.find_midline_inside_track(track, is_starting=False)
+            midline = geom.smooth_midline_with_spline(waypoints)
+
+            self.publish_traj(midline)
+
+            ############################
 
             midpoints = self.calculate_centerline(self.rmhcth, transform_to_car)
             midpoints_len = len(midpoints)
