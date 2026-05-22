@@ -1,8 +1,5 @@
 import math
 
-import scipy.interpolate as spi
-from scipy.spatial import Delaunay
-
 import json
 import numpy as np
 from cv_bridge import CvBridge
@@ -155,7 +152,7 @@ class CameraTraj(Node):
 
         # Camera intrinsics subscriber to take camera information
         self.info_sub = self.create_subscription(
-            CameraInfo, self.camera_info_topic, self.info_callback, 10
+            CameraInfo, self.camera_info_topic, self.get_camera_info, 10
         )
 
         # Synchronization of YOLO and Depth messages
@@ -169,7 +166,7 @@ class CameraTraj(Node):
             [self.depth_sub, self.yolo_sub], queue_size, max_difference_in_seconds
         )
 
-        self.sync.registerCallback(self.cone_extractor)
+        self.sync.registerCallback(self.acquire_cones_from_images)
 
         self.output_publisher = self.create_publisher(Trajectory, self.output_topic, 10)
         self.create_timer(1.0 / self.node_output_frequecy_hz, self.publish_trajectory)
@@ -190,7 +187,7 @@ class CameraTraj(Node):
         self.get_logger().info("")
         self.get_logger().info("Ready!")
 
-    def info_callback(self, camera_info_msg):
+    def get_camera_info(self, camera_info_msg):
         if self.camera_info is None:
             # Intrinsic camera matrix for the raw (distorted) images.
             #     [fx  0 cx]
@@ -205,7 +202,7 @@ class CameraTraj(Node):
             self.get_logger().info("Camera Intrinsics received!")
             self.info_sub.unregister()
 
-    def cone_extractor(self, depth_msg, yolo_msg):
+    def acquire_cones_from_images(self, depth_msg, yolo_msg):
         if self.camera_info is None:
             return
 

@@ -1,4 +1,8 @@
 import math
+import numpy as np
+
+import scipy.interpolate as spi
+from scipy.spatial import Delaunay
 
 from dataclasses import dataclass
 
@@ -54,7 +58,17 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
 
 # Points must be already ordered
 def find_midline_inside_track(track: Track, is_starting: bool = False) -> list[Point2D]:
-    return []
+    if is_starting:
+        return []
+
+    if len(track.left_cones) < 3 and len(track.right_cones) < 3:
+        return []
+
+    all_cones = np.array(track.left_cones + track.right_cones)
+    sides = np.array([0] * len(track.left_cones) + [1] * len(track.right_cones))
+
+    try:
+        triangulation = Delaunay(all_cones)
 
 
 def smooth_midline_with_spline(waypoints: list[Point2D]) -> list[Point2D]:
