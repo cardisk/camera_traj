@@ -60,6 +60,7 @@ class CameraTraj(Node):
         self.debug_output          = self.p["debug_output"]
 
         # Settings
+        self.node_output_frequecy_hz = self.p["node_output_frequecy_hz"]
         self.depth_extraction_algorithm = str(self.p["depth_extraction_algorithm"]).lower()
 
         self.rmsth  = self.p["rolling_map_safety_threshold"]
@@ -113,6 +114,7 @@ class CameraTraj(Node):
         self.get_logger().info("")
 
         self.get_logger().info("- Settings --------------------------------------------------------------")
+        self.get_logger().info(f"  * node_output_frequecy_hz: {self.node_output_frequecy_hz}")
         self.get_logger().info(f"  * depth_extraction_algorithm: {self.depth_extraction_algorithm}")
         self.get_logger().info("")
         self.get_logger().info(f"  * rolling mapping safety threshold: {self.rmsth}m")
@@ -170,6 +172,7 @@ class CameraTraj(Node):
         self.sync.registerCallback(self.cone_extractor)
 
         self.output_publisher = self.create_publisher(Trajectory, self.output_topic, 10)
+        self.create_timer(1.0 / self.node_output_frequecy_hz, self.publish_trajectory)
 
         if self.debug_output:
             self.rolling_map_marker_pub = self.create_publisher(MarkerArray, self.rolling_map_debug_topic, 10)
@@ -200,6 +203,7 @@ class CameraTraj(Node):
             self.camera_info = prc.CameraInfo(k[0], k[4], k[2], k[5])
             self.get_logger().info("")
             self.get_logger().info("Camera Intrinsics received!")
+            self.info_sub.unregister()
 
     def cone_extractor(self, depth_msg, yolo_msg):
         if self.camera_info is None:
@@ -230,14 +234,12 @@ class CameraTraj(Node):
                 case "bimodal":
                     try:
                         bb = prc.bounding_box_from_detection(det, width, height)
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
                         continue
 
                     try:
                         depth_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid Depth BoundingBox: {e}")
                         continue
@@ -245,11 +247,9 @@ class CameraTraj(Node):
                     try:
                         if depth_bb.size > 0:
                             distance = prc.get_bimodal_distance(depth_bb)
-
                         else:
                             self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
                             continue
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid Depth distance: {e}")
                         continue
@@ -257,14 +257,12 @@ class CameraTraj(Node):
                 case "patching":
                     try:
                         bb = prc.patched_bounding_box_from_detection(det, width, height)
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid BoundingBox: {e}")
                         continue
 
                     try:
                         depth_patched_bb = prc.get_masked_depth_for_bounding_box(depth_array, bb)
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid Depth BoundingBox: {e}")
                         continue
@@ -272,11 +270,9 @@ class CameraTraj(Node):
                     try:
                         if depth_patched_bb.size > 0:
                             distance = prc.get_median_distance(depth_patched_bb)
-
                         else:
                             self.get_logger().warn(f"Detected {bb.color} but could not get any depth data")
                             continue
-
                     except Exception as e:
                         self.get_logger().warn(f"Could not get a valid Depth distance: {e}")
                         continue
@@ -328,36 +324,22 @@ class CameraTraj(Node):
             self.get_logger().info(f"Map updated, active cones: {len(self.rolling_map.cone_map)}")
 
             if self.debug_output:
-                self.publish_map_markers()
+                self.publish_active_map_as_marker_array()
 
-            ############################
+            # midpoints = self.calculate_centerline(self.rmhcth, transform_to_car)
+            # midpoints_len = len(midpoints)
 
-            track = geom.find_track_inside_map(self.rolling_map)
+            # if midpoints_len > 0:
+            #     self.publish_trajectory(midpoints, transform_to_car)
 
-            if self.debug_output:
-                self.publish_track()
-
-            waypoints = geom.find_midline_inside_track(track, is_starting=False)
-            midline = geom.smooth_midline_with_spline(waypoints)
-
-            self.publish_traj(midline)
-
-            ############################
-
-            midpoints = self.calculate_centerline(self.rmhcth, transform_to_car)
-            midpoints_len = len(midpoints)
-
-            if midpoints_len > 0:
-                self.publish_trajectory(midpoints, transform_to_car)
-
-            else:
-                self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
+            # else:
+            #     self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
 
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
             return
 
-    def publish_map_markers(self):
+    def publish_active_map_as_marker_array(self):
         marker_array = MarkerArray()
         current_count = len(self.rolling_map.cone_map)
 
@@ -397,6 +379,7 @@ class CameraTraj(Node):
                 color.g = 1.0
             elif cone.color == "orange_cone":
                 color.r = 1.0
+                color.g = 0.6
             elif cone.color == "large_orange_cone":
                 color.r = 1.0
             else:
@@ -419,104 +402,104 @@ class CameraTraj(Node):
         self.previous_marker_count = current_count
         self.rolling_map_marker_pub.publish(marker_array)
 
-    def calculate_centerline(self, min_hit_count, transform_to_car):
-        left_cones = []
-        right_cones = []
+    # def calculate_centerline(self, min_hit_count, transform_to_car):
+    #     left_cones = []
+    #     right_cones = []
 
-        for cone in self.rolling_map.cone_map:
-            if cone.hit_count < min_hit_count:
-                continue
+    #     for cone in self.rolling_map.cone_map:
+    #         if cone.hit_count < min_hit_count:
+    #             continue
 
-            if cone.color == "blue_cone":
-                left_cones.append([cone.x, cone.y])
+    #         if cone.color == "blue_cone":
+    #             left_cones.append([cone.x, cone.y])
 
-            elif cone.color == "yellow_cone":
-                right_cones.append([cone.x, cone.y])
+    #         elif cone.color == "yellow_cone":
+    #             right_cones.append([cone.x, cone.y])
 
-            elif cone.color in ["orange_cone", "large_orange_cone"]:
-                p_world = PointStamped()
-                p_world.header.frame_id = self.world_frame
-                p_world.point.x = cone.x
-                p_world.point.y = cone.y
-                p_world.point.z = 0.0
+    #         elif cone.color in ["orange_cone", "large_orange_cone"]:
+    #             p_world = PointStamped()
+    #             p_world.header.frame_id = self.world_frame
+    #             p_world.point.x = cone.x
+    #             p_world.point.y = cone.y
+    #             p_world.point.z = 0.0
 
-                p_local = do_transform_point(p_world, transform_to_car)
+    #             p_local = do_transform_point(p_world, transform_to_car)
 
-                if p_local.point.y > 0.0:  # Positive Y = Left (REP 103)
-                    left_cones.append([cone.x, cone.y])
+    #             if p_local.point.y > 0.0:  # Positive Y = Left (REP 103)
+    #                 left_cones.append([cone.x, cone.y])
 
-                else:
-                    right_cones.append([cone.x, cone.y])
+    #             else:
+    #                 right_cones.append([cone.x, cone.y])
 
-        if len(left_cones) < 1 or len(right_cones) < 1:
-            return []
+    #     if len(left_cones) < 1 or len(right_cones) < 1:
+    #         return []
 
-        if len(left_cones) < 3 and len(right_cones) < 3:
-            return []
+    #     if len(left_cones) < 3 and len(right_cones) < 3:
+    #         return []
 
-        all_cones = np.array(left_cones + right_cones)
-        sides = np.array([0]*len(left_cones) + [1]*len(right_cones))
+    #     all_cones = np.array(left_cones + right_cones)
+    #     sides = np.array([0]*len(left_cones) + [1]*len(right_cones))
 
-        try:
-            tri = Delaunay(all_cones)
+    #     try:
+    #         tri = Delaunay(all_cones)
 
-        except Exception:
-            return []
+    #     except Exception:
+    #         return []
 
-        midpoints = []
-        for simplex in tri.simplices:
-            edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
+    #     midpoints = []
+    #     for simplex in tri.simplices:
+    #         edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
 
-            for p1_idx, p2_idx in edges:
-                if sides[p1_idx] != sides[p2_idx]:
-                    p1 = all_cones[p1_idx]
-                    p2 = all_cones[p2_idx]
-                    dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+    #         for p1_idx, p2_idx in edges:
+    #             if sides[p1_idx] != sides[p2_idx]:
+    #                 p1 = all_cones[p1_idx]
+    #                 p2 = all_cones[p2_idx]
+    #                 dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-                    if self.delaunay_min_distance < dist < self.delaunay_max_distance:
-                        midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
+    #                 if self.delaunay_min_distance < dist < self.delaunay_max_distance:
+    #                     midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
 
-        if len(midpoints) > 0:
-            midpoints = np.unique(np.array(midpoints), axis=0).tolist()
+    #     if len(midpoints) > 0:
+    #         midpoints = np.unique(np.array(midpoints), axis=0).tolist()
 
-        return midpoints
+    #     return midpoints
 
-    def smooth_and_resample(self, ordered_points, resolution=0.5):
-        if len(ordered_points) < 4:
-            return ordered_points
+    # def smooth_and_resample(self, ordered_points, resolution=0.5):
+    #     if len(ordered_points) < 4:
+    #         return ordered_points
 
-        pts = np.array(ordered_points)
-        x = pts[:, 0]
-        y = pts[:, 1]
+    #     pts = np.array(ordered_points)
+    #     x = pts[:, 0]
+    #     y = pts[:, 1]
 
-        diffs = np.diff(pts, axis=0)
-        dists = np.linalg.norm(diffs, axis=1)
-        num_points = max(int(np.sum(dists) / resolution), 2)
+    #     diffs = np.diff(pts, axis=0)
+    #     dists = np.linalg.norm(diffs, axis=1)
+    #     num_points = max(int(np.sum(dists) / resolution), 2)
 
-        try:
-            tck, _u = spi.splprep([x, y], s=self.spline_smoothing, k=self.spline_degree)
-            u_new = np.linspace(0, 1.0, num_points)
-            new_x, new_y = spi.splev(u_new, tck)
-            return np.vstack((new_x, new_y)).T.tolist()
+    #     try:
+    #         tck, _u = spi.splprep([x, y], s=self.spline_smoothing, k=self.spline_degree)
+    #         u_new = np.linspace(0, 1.0, num_points)
+    #         new_x, new_y = spi.splev(u_new, tck)
+    #         return np.vstack((new_x, new_y)).T.tolist()
 
-        except Exception:
-            return ordered_points
+    #     except Exception:
+    #         return ordered_points
 
-    def get_curvature(self, p1, p2, p3):
-        area = 0.5 * abs(p1[0]*(p2[1] - p3[1]) + p2[0]*(p3[1] - p1[1]) + p3[0]*(p1[1] - p2[1]))
-        a = math.hypot(p1[0]-p2[0], p1[1]-p2[1])
-        b = math.hypot(p2[0]-p3[0], p2[1]-p3[1])
-        c = math.hypot(p3[0]-p1[0], p3[1]-p1[1])
+    # def get_curvature(self, p1, p2, p3):
+    #     area = 0.5 * abs(p1[0]*(p2[1] - p3[1]) + p2[0]*(p3[1] - p1[1]) + p3[0]*(p1[1] - p2[1]))
+    #     a = math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+    #     b = math.hypot(p2[0]-p3[0], p2[1]-p3[1])
+    #     c = math.hypot(p3[0]-p1[0], p3[1]-p1[1])
 
-        if a * b * c == 0.0:
-            return 0.0
+    #     if a * b * c == 0.0:
+    #         return 0.0
 
-        curvature = (4.0 * area) / (a * b * c)
-        cross_z = (p2[0] - p1[0]) * (p3[1] - p2[1]) - (p2[1] - p1[1]) * (p3[0] - p2[0])
+    #     curvature = (4.0 * area) / (a * b * c)
+    #     cross_z = (p2[0] - p1[0]) * (p3[1] - p2[1]) - (p2[1] - p1[1]) * (p3[0] - p2[0])
 
-        return curvature * (1.0 if cross_z > 0 else -1.0)
+    #     return curvature * (1.0 if cross_z > 0 else -1.0)
 
-    def publish_trajectory(self, midpoints, transform_to_car):
+    def publish_trajectory_old(self, midpoints, transform_to_car):
         if len(midpoints) < 3:
             return
 
@@ -605,6 +588,9 @@ class CameraTraj(Node):
             vis_msg.color.a = 1.0
             vis_msg.points = traj_msg.trajectory
             self.trajectory_marker_pub.publish(vis_msg)
+
+    def publish_trajectory(self):
+        pass
 
 
 def main(args=None):

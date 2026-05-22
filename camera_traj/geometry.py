@@ -40,9 +40,11 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
             case "yellow_cone":
                 track.right_cones.append(Point2D(cone.x, cone.y))
 
-            case "orange_cone" | "large_orange_cone":
-                # TODO: need to find a way to consider them
-                pass
+            case "orange_cone":
+                track.orange_cones.append(Point2D(cone.x, cone.y))
+
+            case "large_orange_cone":
+                track.large_orange_cones.append(Point2D(cone.x, cone.y))
 
             case _:
                 raise Exception(f"Unknown cone color: {cone.color}")

@@ -14,6 +14,7 @@ camera_traj:
     output_topic: "/camera_traj/output"
 
     # Settings
+    node_output_frequecy_hz: 15
     depth_extraction_algorithm: "bimodal"
 
     rolling_map_safety_threshold: 1.5
