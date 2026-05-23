@@ -496,95 +496,95 @@ class CameraTraj(Node):
 
     #     return curvature * (1.0 if cross_z > 0 else -1.0)
 
-    def publish_trajectory_old(self, midpoints, transform_to_car):
-        if len(midpoints) < 3:
-            return
+    # def publish_trajectory(self, midpoints, transform_to_car):
+    #     if len(midpoints) < 3:
+    #         return
 
-        # Find the starting point of the trajectory (min local X)
-        start_point = None
-        min_local_x = float('inf')
+    #     # Find the starting point of the trajectory (min local X)
+    #     start_point = None
+    #     min_local_x = float('inf')
 
-        for p in midpoints:
-            p_world = PointStamped()
-            p_world.header.frame_id = self.world_frame
-            p_world.point.x = float(p[0])
-            p_world.point.y = float(p[1])
-            p_world.point.z = 0.0
+    #     for p in midpoints:
+    #         p_world = PointStamped()
+    #         p_world.header.frame_id = self.world_frame
+    #         p_world.point.x = float(p[0])
+    #         p_world.point.y = float(p[1])
+    #         p_world.point.z = 0.0
 
-            p_local = do_transform_point(p_world, transform_to_car)
+    #         p_local = do_transform_point(p_world, transform_to_car)
 
-            if p_local.point.x < min_local_x:
-                min_local_x = p_local.point.x
-                start_point = p
+    #         if p_local.point.x < min_local_x:
+    #             min_local_x = p_local.point.x
+    #             start_point = p
 
-        # Spatial ordering
-        current_pos = start_point
-        ordered_points = [current_pos]
-        unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
+    #     # Spatial ordering
+    #     current_pos = start_point
+    #     ordered_points = [current_pos]
+    #     unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
 
-        MIN_DIST_BETWEEN_WAYPOINTS = 0.5
+    #     MIN_DIST_BETWEEN_WAYPOINTS = 0.5
 
-        while unvisited:
-            distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
-            closest_idx = np.argmin(distances)
-            closest_point = unvisited.pop(closest_idx)
+    #     while unvisited:
+    #         distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
+    #         closest_idx = np.argmin(distances)
+    #         closest_point = unvisited.pop(closest_idx)
 
-            if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > MIN_DIST_BETWEEN_WAYPOINTS:
-                ordered_points.append(closest_point)
-                current_pos = closest_point
+    #         if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > MIN_DIST_BETWEEN_WAYPOINTS:
+    #             ordered_points.append(closest_point)
+    #             current_pos = closest_point
 
-        # Smoothing and resampling
-        dense_points = self.smooth_and_resample(ordered_points, resolution=self.spline_sampling_resolution)
+    #     # Smoothing and resampling
+    #     dense_points = self.smooth_and_resample(ordered_points, resolution=self.spline_sampling_resolution)
 
-        if len(dense_points) < 3:
-            return
+    #     if len(dense_points) < 3:
+    #         return
 
-        # Message and physics calc
-        traj_msg = Trajectory()
-        traj_msg.header.frame_id = self.world_frame
-        traj_msg.header.stamp = self.get_clock().now().to_msg()
+    #     # Message and physics calc
+    #     traj_msg = Trajectory()
+    #     traj_msg.header.frame_id = self.world_frame
+    #     traj_msg.header.stamp = self.get_clock().now().to_msg()
 
-        MAX_LAT_ACCEL = 5.0
-        MAX_SPEED = 15.0
-        MIN_SPEED = 3.0
+    #     MAX_LAT_ACCEL = 5.0
+    #     MAX_SPEED = 15.0
+    #     MIN_SPEED = 3.0
 
-        k_array = [0.0] * len(dense_points)
-        v_array = [0.0] * len(dense_points)
+    #     k_array = [0.0] * len(dense_points)
+    #     v_array = [0.0] * len(dense_points)
 
-        for i in range(1, len(dense_points) - 1):
-            k = self.get_curvature(dense_points[i-1], dense_points[i], dense_points[i+1])
-            k_array[i] = k
-            abs_k = abs(k)
-            v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
+    #     for i in range(1, len(dense_points) - 1):
+    #         k = self.get_curvature(dense_points[i-1], dense_points[i], dense_points[i+1])
+    #         k_array[i] = k
+    #         abs_k = abs(k)
+    #         v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
 
-        k_array[0] = k_array[1]
-        v_array[0] = v_array[1]
-        k_array[-1] = k_array[-2]
-        v_array[-1] = v_array[-2]
+    #     k_array[0] = k_array[1]
+    #     v_array[0] = v_array[1]
+    #     k_array[-1] = k_array[-2]
+    #     v_array[-1] = v_array[-2]
 
-        for i, p in enumerate(dense_points):
-            pt = Point()
-            pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
-            traj_msg.trajectory.append(pt)
-            traj_msg.curvatures.append(float(k_array[i]))
-            traj_msg.velocities.append(float(v_array[i]))
+    #     for i, p in enumerate(dense_points):
+    #         pt = Point()
+    #         pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
+    #         traj_msg.trajectory.append(pt)
+    #         traj_msg.curvatures.append(float(k_array[i]))
+    #         traj_msg.velocities.append(float(v_array[i]))
 
-        self.output_publisher.publish(traj_msg)
+    #     self.output_publisher.publish(traj_msg)
 
-        # Debug
-        if self.debug_output:
-            vis_msg = Marker()
-            vis_msg.header = traj_msg.header
-            vis_msg.ns = "trajectory"
-            vis_msg.id = 0
-            vis_msg.type = Marker.LINE_STRIP
-            vis_msg.action = Marker.ADD
-            vis_msg.pose.orientation.w = 1.0
-            vis_msg.scale.x = 0.1
-            vis_msg.color.g = 1.0 # Green
-            vis_msg.color.a = 1.0
-            vis_msg.points = traj_msg.trajectory
-            self.trajectory_marker_pub.publish(vis_msg)
+    #     # Debug
+    #     if self.debug_output:
+    #         vis_msg = Marker()
+    #         vis_msg.header = traj_msg.header
+    #         vis_msg.ns = "trajectory"
+    #         vis_msg.id = 0
+    #         vis_msg.type = Marker.LINE_STRIP
+    #         vis_msg.action = Marker.ADD
+    #         vis_msg.pose.orientation.w = 1.0
+    #         vis_msg.scale.x = 0.1
+    #         vis_msg.color.g = 1.0 # Green
+    #         vis_msg.color.a = 1.0
+    #         vis_msg.points = traj_msg.trajectory
+    #         self.trajectory_marker_pub.publish(vis_msg)
 
     def publish_trajectory(self):
         pass

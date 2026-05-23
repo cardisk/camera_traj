@@ -27,7 +27,6 @@ class Track:
     right_cones: list[Point2D] = []
     orange_cones: list[Point2D] = []
     large_orange_cones: list[Point2D] = []
-    unordered_midpoints: list[Point2D] = []
 
 
 def find_track_inside_map(rolling_map: RollingMap) -> Track:
