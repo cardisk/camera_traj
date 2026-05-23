@@ -57,7 +57,8 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
 
 
 # Points must be already ordered
-def find_midline_inside_track(track: Track, is_starting: bool = False) -> list[Point2D]:
+def find_midline_inside_track(track: Track, delaunay_min_distance: float,
+        delaunay_max_distance: float, is_starting: bool = False) -> list[Point2D]:
     if is_starting:
         return []
 
@@ -69,6 +70,33 @@ def find_midline_inside_track(track: Track, is_starting: bool = False) -> list[P
 
     try:
         triangulation = Delaunay(all_cones)
+    except Exception:
+        return []
+
+    midpoints = []
+    for simplex in triangulation.simplices:
+        edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
+
+        for p1_idx, p2_idx in edges:
+            if sides[p1_idx] != sides[p2_idx]:
+                p1 = all_cones[p1_idx]
+                p2 = all_cones[p2_idx]
+                dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
+
+                if delaunay_min_distance < dist < delaunay_max_distance:
+                    midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
+
+    if len(track.large_orange_cones) == 2:
+        p1 = track.large_orange_cones[0]
+        p2 = track.large_orange_cones[1]
+        midpoints.append([(p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0])
+
+    if len(midpoints) > 0:
+        midpoints = np.unique(np.array(midpoints), axis=0).tolist()
+
+    # TODO: ordering of the midpoints here
+
+    return midpoints
 
 
 def smooth_midline_with_spline(waypoints: list[Point2D]) -> list[Point2D]:
