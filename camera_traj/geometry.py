@@ -93,9 +93,40 @@ def find_midline_inside_track(track: Track, delaunay_min_distance: float,
     if len(midpoints) > 0:
         midpoints = np.unique(np.array(midpoints), axis=0).tolist()
 
-    # TODO: ordering of the midpoints here
+    # Find the starting point of the trajectory (min local X)
+    start_point = None
+    min_local_x = float('inf')
 
-    return midpoints
+    for p in midpoints:
+        p_world = PointStamped()
+        p_world.header.frame_id = self.world_frame
+        p_world.point.x = float(p[0])
+        p_world.point.y = float(p[1])
+        p_world.point.z = 0.0
+
+        p_local = do_transform_point(p_world, transform_to_car)
+
+        if p_local.point.x < min_local_x:
+            min_local_x = p_local.point.x
+            start_point = p
+
+    # Spatial ordering
+    current_pos = start_point
+    ordered_points = [current_pos]
+    unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
+
+    MIN_DIST_BETWEEN_WAYPOINTS = 0.5
+
+    while unvisited:
+        distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
+        closest_idx = np.argmin(distances)
+        closest_point = unvisited.pop(closest_idx)
+
+        if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > MIN_DIST_BETWEEN_WAYPOINTS:
+            ordered_points.append(closest_point)
+            current_pos = closest_point
+
+    return ordered_points
 
 
 def smooth_midline_with_spline(waypoints: list[Point2D]) -> list[Point2D]:
