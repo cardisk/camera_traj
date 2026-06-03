@@ -1,6 +1,6 @@
 ### Modifiche
 [ ] Mission finish + lap counter
-[ ] Pulizia codice + qualche ottimizzazione
+[X] Pulizia codice + qualche ottimizzazione
 [ ] Parametri buoni in simulazione
 
 [ ] Retta che congiunge macchina e punto medio tra coni grossi arancioni in partenza

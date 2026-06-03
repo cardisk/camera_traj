@@ -1,10 +1,14 @@
 import math
+from time import clock_getres
 import numpy as np
 
 import scipy.interpolate as spi
 from scipy.spatial import Delaunay
 
 from dataclasses import dataclass
+
+from tf2_geometry_msgs import do_transform_point
+from geometry_msgs.msg import PointStamped
 
 from .rolling_map import RollingMap
 
@@ -20,6 +24,21 @@ class Point3D:
     x: float
     y: float
     z: float
+
+
+def get_curvature(self, p1, p2, p3):
+    area = 0.5 * abs(p1[0]*(p2[1] - p3[1]) + p2[0]*(p3[1] - p1[1]) + p3[0]*(p1[1] - p2[1]))
+    a = math.hypot(p1[0]-p2[0], p1[1]-p2[1])
+    b = math.hypot(p2[0]-p3[0], p2[1]-p3[1])
+    c = math.hypot(p3[0]-p1[0], p3[1]-p1[1])
+
+    if a * b * c == 0.0:
+        return 0.0
+
+    curvature = (4.0 * area) / (a * b * c)
+    cross_z = (p2[0] - p1[0]) * (p3[1] - p2[1]) - (p2[1] - p1[1]) * (p3[0] - p2[0])
+
+    return curvature * (1.0 if cross_z > 0 else -1.0)
 
 
 class Track:
@@ -55,13 +74,15 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
     return track
 
 
-# Points must be already ordered
-def find_midline_inside_track(track: Track, delaunay_min_distance: float,
-        delaunay_max_distance: float, is_starting: bool = False) -> list[Point2D]:
+def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: float,
+        delaunay_max_distance: float, is_starting: bool = False) -> list:
+
     if is_starting:
+        # TODO: use large_orange_cones to create a straight line
         return []
 
     if len(track.left_cones) < 3 and len(track.right_cones) < 3:
+        # TODO: find a way to create a straight line
         return []
 
     all_cones = np.array(track.left_cones + track.right_cones)
@@ -93,13 +114,20 @@ def find_midline_inside_track(track: Track, delaunay_min_distance: float,
     if len(midpoints) > 0:
         midpoints = np.unique(np.array(midpoints), axis=0).tolist()
 
+    return midpoints
+
+
+def order_midpoints(midpoints: list, world_frame, transform_to_car, min_distance_between_midpoints: float = 0.5) -> list:
+    if not midpoints:
+        return []
+
     # Find the starting point of the trajectory (min local X)
-    start_point = None
+    start_point: tuple = ()
     min_local_x = float('inf')
 
     for p in midpoints:
         p_world = PointStamped()
-        p_world.header.frame_id = self.world_frame
+        p_world.header.frame_id = world_frame
         p_world.point.x = float(p[0])
         p_world.point.y = float(p[1])
         p_world.point.z = 0.0
@@ -110,87 +138,40 @@ def find_midline_inside_track(track: Track, delaunay_min_distance: float,
             min_local_x = p_local.point.x
             start_point = p
 
-    # Spatial ordering
-    current_pos = start_point
-    ordered_points = [current_pos]
+    # Spatial ordering (Nearest Neighbour)
+    current_pos: tuple = start_point
+    ordered_points: list = [current_pos]
     unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
-
-    MIN_DIST_BETWEEN_WAYPOINTS = 0.5
 
     while unvisited:
         distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
         closest_idx = np.argmin(distances)
         closest_point = unvisited.pop(closest_idx)
 
-        if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > MIN_DIST_BETWEEN_WAYPOINTS:
+        if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > min_distance_between_midpoints:
             ordered_points.append(closest_point)
             current_pos = closest_point
 
-    return ordered_points
+    return np.array(ordered_points)
 
 
-def smooth_midline_with_spline(waypoints: list[Point2D]) -> list[Point2D]:
-    return []
+def smooth_midline_with_spline(midpoints: list, degree: int, smoothing_factor: int, sampling_resolution: float = 0.5) -> list:
+    if len(midpoints) < degree + 1:
+        return midpoints
 
+    pts = np.array(midpoints)
+    x = pts[:, 0]
+    y = pts[:, 1]
 
-def calculate_centerline(self, min_hit_count, transform_to_car):
-    left_cones = []
-    right_cones = []
-
-    for cone in self.rolling_map.cone_map:
-        if cone.hit_count < min_hit_count:
-            continue
-
-        if cone.color == "blue_cone":
-            left_cones.append([cone.x, cone.y])
-
-        elif cone.color == "yellow_cone":
-            right_cones.append([cone.x, cone.y])
-
-        elif cone.color in ["orange_cone", "large_orange_cone"]:
-            p_world = PointStamped()
-            p_world.header.frame_id = self.world_frame
-            p_world.point.x = cone.x
-            p_world.point.y = cone.y
-            p_world.point.z = 0.0
-
-            p_local = do_transform_point(p_world, transform_to_car)
-
-            if p_local.point.y > 0.0:  # Positive Y = Left (REP 103)
-                left_cones.append([cone.x, cone.y])
-
-            else:
-                right_cones.append([cone.x, cone.y])
-
-    if len(left_cones) < 1 or len(right_cones) < 1:
-        return []
-
-    if len(left_cones) < 3 and len(right_cones) < 3:
-        return []
-
-    all_cones = np.array(left_cones + right_cones)
-    sides = np.array([0]*len(left_cones) + [1]*len(right_cones))
+    diffs = np.diff(pts, axis=0)
+    dists = np.linalg.norm(diffs, axis=1)
+    num_points = max(int(np.sum(dists) / sampling_resolution), 2)
 
     try:
-        tri = Delaunay(all_cones)
+        tck, _u = spi.splprep([x, y], s=smoothing_factor, k=degree)
+        u_new = np.linspace(0, 1.0, num_points)
+        new_x, new_y = spi.splev(u_new, tck)
+        return np.vstack((new_x, new_y)).T.tolist()
 
     except Exception:
-        return []
-
-    midpoints = []
-    for simplex in tri.simplices:
-        edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
-
-        for p1_idx, p2_idx in edges:
-            if sides[p1_idx] != sides[p2_idx]:
-                p1 = all_cones[p1_idx]
-                p2 = all_cones[p2_idx]
-                dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
-
-                if self.delaunay_min_distance < dist < self.delaunay_max_distance:
-                    midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
-
-    if len(midpoints) > 0:
-        midpoints = np.unique(np.array(midpoints), axis=0).tolist()
-
-    return midpoints
+        return midpoints

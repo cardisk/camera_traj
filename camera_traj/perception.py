@@ -23,6 +23,27 @@ def project_point2d_into_3d_optical_frame(point2d, depth, camera_info):
     return Point3D(x_opt, y_opt, z_opt)
 
 
+def transform_point2d(tf_buffer, point, current_timestamp, current_frame, target_frame, lookup_timeout=0.2):
+    current_pt = PointStamped()
+
+    current_pt.header.frame_id = current_frame
+    current_pt.header.stamp = current_timestamp
+    current_pt.point.x = point.x
+    current_pt.point.y = point.y
+    current_pt.point.z = 0.0
+
+    transform = tf_buffer.lookup_transform(
+        target_frame,
+        current_pt.header.frame_id,
+        rclpy.time.Time(),
+        rclpy.duration.Duration(seconds=lookup_timeout)
+    )
+
+    target_pt = do_transform_point(current_pt, transform)
+
+    return Point2D(target_pt.point.x, target_pt.point.y)
+
+
 def transform_point3d(tf_buffer, point, current_timestamp, current_frame, target_frame, lookup_timeout=0.2):
     current_pt = PointStamped()
 
@@ -42,6 +63,10 @@ def transform_point3d(tf_buffer, point, current_timestamp, current_frame, target
     target_pt = do_transform_point(current_pt, transform)
 
     return Point3D(target_pt.point.x, target_pt.point.y, target_pt.point.z)
+
+
+def transform_point2d_to_car_frame():
+    pass
 
 
 @dataclass
