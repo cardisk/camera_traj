@@ -112,7 +112,27 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
         return []
 
     if len(track.left_cones) < 3 and len(track.right_cones) < 3:
-        # TODO: find a way to create a straight line
+        if transform_to_world is not None:
+            # Straight line 15 meters
+            target_length = 15.0 # meters
+            step = 0.5 # meters
+            num_points = int(target_length / step)
+
+            straight_line = []
+            for i in range(num_points + 1):
+                p_local = PointStamped()
+                # TODO: refactor frame_id naming
+                p_local.header.frame_id = 'car_frame'
+                p_local.point.x = float(i * step)
+                p_local.point.y = 0.0
+                p_local.point.z = 0.0
+
+                p_world = do_transform_point(p_local, transform_to_world)
+                straight_line.append([p_world.point.x, p_world.point.y])
+
+            return straight_line
+
+        # Fallback
         return []
 
     all_cones = np.array(track.left_cones + track.right_cones)
