@@ -3,11 +3,11 @@
 [X] Pulizia codice + qualche ottimizzazione
 [ ] Parametri buoni in simulazione
 
-[ ] Retta che congiunge macchina e punto medio tra coni grossi arancioni in partenza
+[X] Retta che congiunge macchina e punto medio tra coni grossi arancioni in partenza
 [X] Ignora i coni arancioni grossi e trova direttamente il middlepoint fra loro
-[ ] Skidpad, localizzare la traiettoria globale e poi fare delaunay. Selezionare midpoints più vicini a globale
+[-] Skidpad, localizzare la traiettoria globale e poi fare delaunay. Selezionare midpoints più vicini a globale
 
-[ ] Provare ad invertire NN dato da gemini confrontando la riga con tutti i coni arancioni
+[?] Provare ad invertire NN dato da gemini confrontando la riga con tutti i coni arancioni
 
 ### Testing
 [ ] Performance ~14Hz

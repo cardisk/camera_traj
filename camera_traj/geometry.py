@@ -75,10 +75,40 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
 
 
 def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: float,
-        delaunay_max_distance: float, is_starting: bool = False) -> list:
+        delaunay_max_distance: float, is_starting: bool = False, transform_to_world = None) -> list:
 
-    if is_starting:
-        # TODO: use large_orange_cones to create a straight line
+    if is_starting and transform_to_world is not None:
+        if len(track.large_orange_cones) >= 2:
+            p1 = track.large_orange_cones[0]
+            p2 = track.large_orange_cones[1]
+            mid_world_x = (p1.x + p2.x) / 2.0
+            mid_world_y = (p1.y + p2.y) / 2.0
+
+            car_x = transform_to_world.transform.translation.x
+            car_y = transform_to_world.transform.translation.y
+
+            dx = mid_world_x - car_x
+            dy = mid_world_y - car_y
+            dist = math.hypot(dx, dy)
+
+            if dist > 0.0:
+                dir_x = dx / dist
+                dir_y = dy / dist
+
+                target_length = 15.0 # meters
+                step = 0.5 # meters
+                num_points = int(target_length / step)
+
+                straight_line = []
+                for i in range(num_points + 1):
+                    straight_line.append([
+                        car_x + dir_x * (i * step),
+                        car_y + dir_y * (i * step)
+                    ])
+
+                return straight_line
+
+        # Fallback
         return []
 
     if len(track.left_cones) < 3 and len(track.right_cones) < 3:
@@ -106,7 +136,7 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
                 if delaunay_min_distance < dist < delaunay_max_distance:
                     midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
 
-    if len(track.large_orange_cones) == 2:
+    if len(track.large_orange_cones) >= 2:
         p1 = track.large_orange_cones[0]
         p2 = track.large_orange_cones[1]
         midpoints.append([(p1.x + p2.x) / 2.0, (p1.y + p2.y) / 2.0])
