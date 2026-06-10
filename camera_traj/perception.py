@@ -65,10 +65,6 @@ def transform_point3d(tf_buffer, point, current_timestamp, current_frame, target
     return Point3D(target_pt.point.x, target_pt.point.y, target_pt.point.z)
 
 
-def transform_point2d_to_car_frame():
-    pass
-
-
 @dataclass
 class BoundingBox:
     p1: Point2D

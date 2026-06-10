@@ -11,6 +11,7 @@ from tf2_geometry_msgs import do_transform_point
 from geometry_msgs.msg import PointStamped
 
 from .rolling_map import RollingMap
+from .state import node_state
 
 
 @dataclass
@@ -74,18 +75,16 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
     return track
 
 
-def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: float,
-        delaunay_max_distance: float, is_starting: bool = False, transform_to_world = None) -> list:
-
-    if is_starting and transform_to_world is not None:
+def find_unordered_midpoints_inside_track(track: Track, is_starting: bool = False) -> list:
+    if is_starting:
         if len(track.large_orange_cones) >= 2:
             p1 = track.large_orange_cones[0]
             p2 = track.large_orange_cones[1]
             mid_world_x = (p1.x + p2.x) / 2.0
             mid_world_y = (p1.y + p2.y) / 2.0
 
-            car_x = transform_to_world.transform.translation.x
-            car_y = transform_to_world.transform.translation.y
+            car_x = node_state.last_transform_to_world.transform.translation.x
+            car_y = node_state.last_transform_to_world.transform.translation.y
 
             dx = mid_world_x - car_x
             dy = mid_world_y - car_y
@@ -95,6 +94,7 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
                 dir_x = dx / dist
                 dir_y = dy / dist
 
+                # TODO: make these as parameters!!!
                 target_length = 15.0 # meters
                 step = 0.5 # meters
                 num_points = int(target_length / step)
@@ -112,8 +112,9 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
         return []
 
     if len(track.left_cones) < 3 and len(track.right_cones) < 3:
-        if transform_to_world is not None:
             # Straight line 15 meters
+            #
+            # TODO: make these as parameters!!!
             target_length = 15.0 # meters
             step = 0.5 # meters
             num_points = int(target_length / step)
@@ -121,19 +122,15 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
             straight_line = []
             for i in range(num_points + 1):
                 p_local = PointStamped()
-                # TODO: refactor frame_id naming
-                p_local.header.frame_id = 'car_frame'
+                p_local.header.frame_id = node_state.params["car_frame"]
                 p_local.point.x = float(i * step)
                 p_local.point.y = 0.0
                 p_local.point.z = 0.0
 
-                p_world = do_transform_point(p_local, transform_to_world)
+                p_world = do_transform_point(p_local, node_state.last_transform_to_world)
                 straight_line.append([p_world.point.x, p_world.point.y])
 
             return straight_line
-
-        # Fallback
-        return []
 
     all_cones = np.array(track.left_cones + track.right_cones)
     sides = np.array([0] * len(track.left_cones) + [1] * len(track.right_cones))
@@ -153,7 +150,7 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
                 p2 = all_cones[p2_idx]
                 dist = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
 
-                if delaunay_min_distance < dist < delaunay_max_distance:
+                if node_state.params["delaunay_min_distance"] < dist < node_state.params["delaunay_max_distance"]:
                     midpoints.append([(p1[0] + p2[0]) / 2.0, (p1[1] + p2[1]) / 2.0])
 
     if len(track.large_orange_cones) >= 2:
@@ -167,7 +164,8 @@ def find_unordered_midpoints_inside_track(track: Track, delaunay_min_distance: f
     return midpoints
 
 
-def order_midpoints(midpoints: list, world_frame, transform_to_car, min_distance_between_midpoints: float = 0.5) -> list:
+# TODO: make min_distance_between_midpoints a parameter!!!
+def order_midpoints(midpoints: list, min_distance_between_midpoints: float = 0.5) -> list:
     if not midpoints:
         return []
 
@@ -177,12 +175,12 @@ def order_midpoints(midpoints: list, world_frame, transform_to_car, min_distance
 
     for p in midpoints:
         p_world = PointStamped()
-        p_world.header.frame_id = world_frame
+        p_world.header.frame_id = node_state.params["world_frame"]
         p_world.point.x = float(p[0])
         p_world.point.y = float(p[1])
         p_world.point.z = 0.0
 
-        p_local = do_transform_point(p_world, transform_to_car)
+        p_local = do_transform_point(p_world, node_state.last_transform_to_car)
 
         if p_local.point.x < min_local_x:
             min_local_x = p_local.point.x
@@ -205,7 +203,9 @@ def order_midpoints(midpoints: list, world_frame, transform_to_car, min_distance
     return np.array(ordered_points)
 
 
-def smooth_midline_with_spline(midpoints: list, degree: int, smoothing_factor: int, sampling_resolution: float = 0.5) -> list:
+def smooth_midline_with_spline(midpoints: list) -> list:
+    degree = node_state.params["spline_degree"]
+
     if len(midpoints) < degree + 1:
         return midpoints
 
@@ -215,10 +215,10 @@ def smooth_midline_with_spline(midpoints: list, degree: int, smoothing_factor: i
 
     diffs = np.diff(pts, axis=0)
     dists = np.linalg.norm(diffs, axis=1)
-    num_points = max(int(np.sum(dists) / sampling_resolution), 2)
+    num_points = max(int(np.sum(dists) / node_state.params["spline_sampling_resolution"]), 2)
 
     try:
-        tck, _u = spi.splprep([x, y], s=smoothing_factor, k=degree)
+        tck, _u = spi.splprep([x, y], s=node_state.params["spline_smoothing"], k=degree)
         u_new = np.linspace(0, 1.0, num_points)
         new_x, new_y = spi.splev(u_new, tck)
         return np.vstack((new_x, new_y)).T.tolist()

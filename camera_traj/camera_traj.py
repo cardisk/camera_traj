@@ -19,6 +19,7 @@ from driverless_msgs.msg import BoundingBoxes, Trajectory
 
 from tf2_ros import Buffer, TransformListener
 
+from .state import node_state
 from .rolling_map import MapPoint, RollingMap
 from . import perception as prc
 from . import geometry as geom
@@ -49,6 +50,8 @@ class CameraTraj(Node):
             name: param.value
             for name, param in self.get_parameters_by_prefix('').items()
         }
+
+        node_state.params = self.p
 
         # Flags
         self.use_sim_time          = self.p["use_sim_time"]
@@ -489,7 +492,19 @@ class CameraTraj(Node):
     #         self.trajectory_marker_pub.publish(vis_msg)
 
     def publish_trajectory(self):
-        pass
+        node_state.last_transform_to_car = self.tf_buffer.lookup_transform(
+            self.car_frame,
+            self.world_frame,
+            rclpy.time.Time(),  # get the latest transformation
+            rclpy.duration.Duration(seconds=0.2)
+        )
+
+        node_state.last_transform_to_world = self.tf_buffer.lookup_transform(
+            self.world_frame,
+            self.car_frame,
+            rclpy.time.Time(),  # get the latest transformation
+            rclpy.duration.Duration(seconds=0.2)
+        )
 
 
 def main(args=None):
