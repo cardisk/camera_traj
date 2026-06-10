@@ -444,67 +444,127 @@ class CameraTraj(Node):
     #     if len(dense_points) < 3:
     #         return
 
-    #     # Message and physics calc
-    #     traj_msg = Trajectory()
-    #     traj_msg.header.frame_id = self.world_frame
-    #     traj_msg.header.stamp = self.get_clock().now().to_msg()
+        # # Message and physics calc
+        # traj_msg = Trajectory()
+        # traj_msg.header.frame_id = self.world_frame
+        # traj_msg.header.stamp = self.get_clock().now().to_msg()
 
-    #     MAX_LAT_ACCEL = 5.0
-    #     MAX_SPEED = 15.0
-    #     MIN_SPEED = 3.0
+        # MAX_LAT_ACCEL = 5.0
+        # MAX_SPEED = 15.0
+        # MIN_SPEED = 3.0
 
-    #     k_array = [0.0] * len(dense_points)
-    #     v_array = [0.0] * len(dense_points)
+        # k_array = [0.0] * len(dense_points)
+        # v_array = [0.0] * len(dense_points)
 
-    #     for i in range(1, len(dense_points) - 1):
-    #         k = self.get_curvature(dense_points[i-1], dense_points[i], dense_points[i+1])
-    #         k_array[i] = k
-    #         abs_k = abs(k)
-    #         v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
+        # for i in range(1, len(dense_points) - 1):
+        #     k = self.get_curvature(dense_points[i-1], dense_points[i], dense_points[i+1])
+        #     k_array[i] = k
+        #     abs_k = abs(k)
+        #     v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
 
-    #     k_array[0] = k_array[1]
-    #     v_array[0] = v_array[1]
-    #     k_array[-1] = k_array[-2]
-    #     v_array[-1] = v_array[-2]
+        # k_array[0] = k_array[1]
+        # v_array[0] = v_array[1]
+        # k_array[-1] = k_array[-2]
+        # v_array[-1] = v_array[-2]
 
-    #     for i, p in enumerate(dense_points):
-    #         pt = Point()
-    #         pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
-    #         traj_msg.trajectory.append(pt)
-    #         traj_msg.curvatures.append(float(k_array[i]))
-    #         traj_msg.velocities.append(float(v_array[i]))
+        # for i, p in enumerate(dense_points):
+        #     pt = Point()
+        #     pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
+        #     traj_msg.trajectory.append(pt)
+        #     traj_msg.curvatures.append(float(k_array[i]))
+        #     traj_msg.velocities.append(float(v_array[i]))
 
-    #     self.output_publisher.publish(traj_msg)
+        # self.output_publisher.publish(traj_msg)
 
-    #     # Debug
-    #     if self.debug_output:
-    #         vis_msg = Marker()
-    #         vis_msg.header = traj_msg.header
-    #         vis_msg.ns = "trajectory"
-    #         vis_msg.id = 0
-    #         vis_msg.type = Marker.LINE_STRIP
-    #         vis_msg.action = Marker.ADD
-    #         vis_msg.pose.orientation.w = 1.0
-    #         vis_msg.scale.x = 0.1
-    #         vis_msg.color.g = 1.0 # Green
-    #         vis_msg.color.a = 1.0
-    #         vis_msg.points = traj_msg.trajectory
-    #         self.trajectory_marker_pub.publish(vis_msg)
+        # # Debug
+        # if self.debug_output:
+        #     vis_msg = Marker()
+        #     vis_msg.header = traj_msg.header
+        #     vis_msg.ns = "trajectory"
+        #     vis_msg.id = 0
+        #     vis_msg.type = Marker.LINE_STRIP
+        #     vis_msg.action = Marker.ADD
+        #     vis_msg.pose.orientation.w = 1.0
+        #     vis_msg.scale.x = 0.1
+        #     vis_msg.color.g = 1.0 # Green
+        #     vis_msg.color.a = 1.0
+        #     vis_msg.points = traj_msg.trajectory
+        #     self.trajectory_marker_pub.publish(vis_msg)
 
     def publish_trajectory(self):
-        node_state.last_transform_to_car = self.tf_buffer.lookup_transform(
-            self.car_frame,
-            self.world_frame,
-            rclpy.time.Time(),  # get the latest transformation
-            rclpy.duration.Duration(seconds=0.2)
-        )
+        try:
+            node_state.last_transform_to_car = self.tf_buffer.lookup_transform(
+                self.car_frame,
+                self.world_frame,
+                rclpy.time.Time(),  # get the latest transformation
+                rclpy.duration.Duration(seconds=0.2)
+            )
+        except Exception:
+            self.get_logger().warn(f"Target frame {self.car_frame} does not exist, skipping...")
 
-        node_state.last_transform_to_world = self.tf_buffer.lookup_transform(
-            self.world_frame,
-            self.car_frame,
-            rclpy.time.Time(),  # get the latest transformation
-            rclpy.duration.Duration(seconds=0.2)
-        )
+        try:
+            node_state.last_transform_to_world = self.tf_buffer.lookup_transform(
+                self.world_frame,
+                self.car_frame,
+                rclpy.time.Time(),  # get the latest transformation
+                rclpy.duration.Duration(seconds=0.2)
+            )
+        except Exception:
+            self.get_logger().warn(f"Target frame {self.world_frame} does not exist, skipping...")
+
+        track = geom.find_track_inside_map(self.rolling_map)
+        unordered_midpoint = geom.find_unordered_midpoints_inside_track(track)
+        ordered_midpoint = geom.order_midpoints(unordered_midpoint)
+        spline = geom.smooth_midline_with_spline(ordered_midpoint)
+
+        # Message and physics calc
+        traj_msg = Trajectory()
+        traj_msg.header.frame_id = self.world_frame
+        traj_msg.header.stamp = self.get_clock().now().to_msg()
+
+        # TODO: make these as parameters!!!
+        MAX_LAT_ACCEL = 5.0
+        MAX_SPEED = 15.0
+        MIN_SPEED = 3.0
+
+        k_array = [0.0] * len(spline)
+        v_array = [0.0] * len(spline)
+
+        for i in range(1, len(spline) - 1):
+            k = self.get_curvature(spline[i-1], spline[i], spline[i+1])
+            k_array[i] = k
+            abs_k = abs(k)
+            v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
+
+        k_array[0] = k_array[1]
+        v_array[0] = v_array[1]
+        k_array[-1] = k_array[-2]
+        v_array[-1] = v_array[-2]
+
+        for i, p in enumerate(spline):
+            pt = Point()
+            pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
+            traj_msg.trajectory.append(pt)
+            traj_msg.curvatures.append(float(k_array[i]))
+            traj_msg.velocities.append(float(v_array[i]))
+
+        self.output_publisher.publish(traj_msg)
+
+        # Debug
+        if self.debug_output:
+            vis_msg = Marker()
+            vis_msg.header = traj_msg.header
+            vis_msg.ns = "trajectory"
+            vis_msg.id = 0
+            vis_msg.type = Marker.LINE_STRIP
+            vis_msg.action = Marker.ADD
+            vis_msg.pose.orientation.w = 1.0
+            vis_msg.scale.x = 0.1
+            vis_msg.color.g = 1.0 # Green
+            vis_msg.color.a = 1.0
+            vis_msg.points = traj_msg.trajectory
+            self.trajectory_marker_pub.publish(vis_msg)
+
 
 
 def main(args=None):
