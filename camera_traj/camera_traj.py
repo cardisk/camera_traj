@@ -202,7 +202,8 @@ class CameraTraj(Node):
             self.camera_info = prc.CameraInfo(k[0], k[4], k[2], k[5])
             self.get_logger().info("")
             self.get_logger().info("Camera Intrinsics received!")
-            self.info_sub.unregister()
+            # FIX: BUG?!?!?!
+            # self.info_sub.unregister()
 
     def acquire_cones_from_images(self, depth_msg, yolo_msg):
         if self.camera_info is None:
@@ -411,7 +412,7 @@ class CameraTraj(Node):
                 rclpy.duration.Duration(seconds=0.2)
             )
         except Exception:
-            self.get_logger().warn(f"Target frame {self.car_frame} does not exist, skipping...")
+            self.get_logger().warn(f"No {self.car_frame}, pass")
 
         try:
             node_state.last_transform_to_world = self.tf_buffer.lookup_transform(
@@ -421,16 +422,20 @@ class CameraTraj(Node):
                 rclpy.duration.Duration(seconds=0.2)
             )
         except Exception:
-            self.get_logger().warn(f"Target frame {self.world_frame} does not exist, skipping...")
+            self.get_logger().warn(f"No {self.world_frame}, pass")
 
         if node_state.last_transform_to_car is None or node_state.last_transform_to_world is None:
-            self.get_logger().warn("No transformations found car -> world / world -> car, skipping...")
+            self.get_logger().warn("Nothing to work with...")
             return
 
         track = geom.find_track_inside_map(self.rolling_map)
         unordered_midpoint = geom.find_unordered_midpoints_inside_track(track)
         ordered_midpoint = geom.order_midpoints(unordered_midpoint)
         spline = geom.smooth_midline_with_spline(ordered_midpoint)
+
+        if not spline:
+            self.get_logger().warn("No points inside spline, skipping...")
+            return
 
         # Message and physics calc
         traj_msg = Trajectory()
@@ -446,7 +451,7 @@ class CameraTraj(Node):
         v_array = [0.0] * len(spline)
 
         for i in range(1, len(spline) - 1):
-            k = self.get_curvature(spline[i-1], spline[i], spline[i+1])
+            k = geom.get_curvature(spline[i-1], spline[i], spline[i+1])
             k_array[i] = k
             abs_k = abs(k)
             v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
