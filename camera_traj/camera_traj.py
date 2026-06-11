@@ -433,7 +433,7 @@ class CameraTraj(Node):
         ordered_midpoint = geom.order_midpoints(unordered_midpoint)
         spline = geom.smooth_midline_with_spline(ordered_midpoint)
 
-        if not spline:
+        if len(spline) == 0:
             self.get_logger().warn("No points inside spline, skipping...")
             return
 

@@ -5,7 +5,7 @@ import numpy as np
 import scipy.interpolate as spi
 from scipy.spatial import Delaunay
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from tf2_geometry_msgs import do_transform_point
 from geometry_msgs.msg import PointStamped
@@ -42,11 +42,12 @@ def get_curvature(p1, p2, p3):
     return curvature * (1.0 if cross_z > 0 else -1.0)
 
 
+@dataclass
 class Track:
-    left_cones: list[Point2D] = []
-    right_cones: list[Point2D] = []
-    orange_cones: list[Point2D] = []
-    large_orange_cones: list[Point2D] = []
+    left_cones: list[Point2D]         = field(default_factory=list)
+    right_cones: list[Point2D]        = field(default_factory=list)
+    orange_cones: list[Point2D]       = field(default_factory=list)
+    large_orange_cones: list[Point2D] = field(default_factory=list)
 
 
 def find_track_inside_map(rolling_map: RollingMap) -> Track:
@@ -132,12 +133,16 @@ def find_unordered_midpoints_inside_track(track: Track, is_starting: bool = Fals
 
             return straight_line
 
-    all_cones = np.array(track.left_cones + track.right_cones)
+    # Nx2 shape numpy array
+    all_cones_list = [[c.x, c.y] for c in (track.left_cones + track.right_cones)]
+    all_cones = np.array(all_cones_list)
+
     sides = np.array([0] * len(track.left_cones) + [1] * len(track.right_cones))
 
     try:
         triangulation = Delaunay(all_cones)
     except Exception:
+        # TODO: if something happens please throw!!!
         return []
 
     midpoints = []
@@ -166,7 +171,7 @@ def find_unordered_midpoints_inside_track(track: Track, is_starting: bool = Fals
 
 # TODO: make min_distance_between_midpoints a parameter!!!
 def order_midpoints(midpoints: list, min_distance_between_midpoints: float = 0.5) -> list:
-    if not midpoints:
+    if len(midpoints) == 0:
         return []
 
     # Find the starting point of the trajectory (min local X)
