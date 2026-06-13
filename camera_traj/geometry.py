@@ -76,43 +76,8 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
     return track
 
 
-def find_unordered_midpoints_inside_track(track: Track, is_starting: bool = False) -> list:
-    if is_starting:
-        if len(track.large_orange_cones) >= 2:
-            p1 = track.large_orange_cones[0]
-            p2 = track.large_orange_cones[1]
-            mid_world_x = (p1.x + p2.x) / 2.0
-            mid_world_y = (p1.y + p2.y) / 2.0
-
-            car_x = node_state.last_transform_to_world.transform.translation.x
-            car_y = node_state.last_transform_to_world.transform.translation.y
-
-            dx = mid_world_x - car_x
-            dy = mid_world_y - car_y
-            dist = math.hypot(dx, dy)
-
-            if dist > 0.0:
-                dir_x = dx / dist
-                dir_y = dy / dist
-
-                # TODO: make these as parameters!!!
-                target_length = 15.0 # meters
-                step = 0.5 # meters
-                num_points = int(target_length / step)
-
-                straight_line = []
-                for i in range(num_points + 1):
-                    straight_line.append([
-                        car_x + dir_x * (i * step),
-                        car_y + dir_y * (i * step)
-                    ])
-
-                return straight_line
-
-        # Fallback
-        return []
-
-    if len(track.left_cones) < 3 and len(track.right_cones) < 3:
+def find_unordered_midpoints_inside_track(track: Track) -> list:
+    if len(track.left_cones) < 2 and len(track.right_cones) < 2:
             # Straight line 15 meters
             #
             # TODO: make these as parameters!!!
@@ -146,6 +111,12 @@ def find_unordered_midpoints_inside_track(track: Track, is_starting: bool = Fals
         return []
 
     midpoints = []
+
+    # Appending the car position.
+    # Pure Pursuit controller prefers a trajectory near the car
+    midpoints.append([node_state.last_transform_to_world.transform.translation.x,
+                        node_state.last_transform_to_world.transform.translation.y])
+
     for simplex in triangulation.simplices:
         edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
 
