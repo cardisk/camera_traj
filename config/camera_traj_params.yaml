@@ -16,11 +16,12 @@ camera_traj:
     # Settings
     node_output_frequecy_hz: 15
     depth_extraction_algorithm: "bimodal"
+    trajectory_extension_meters: 5.0
 
     rolling_map_safety_threshold: 2.0
     rolling_map_ema_filter_alpha: 0.4
-    rolling_map_hit_count_threshold: 1
-    rolling_map_miss_count_threshold: 3
+    rolling_map_hit_count_threshold: 2
+    rolling_map_miss_count_threshold: 4
     camera_fov_rad: 1.9
     cull_distance_behind: -2.5
     cull_distance_max: 15.0

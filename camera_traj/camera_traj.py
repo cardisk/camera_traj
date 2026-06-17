@@ -431,9 +431,22 @@ class CameraTraj(Node):
         track = geom.find_track_inside_map(self.rolling_map)
         unordered_midpoint = geom.find_unordered_midpoints_inside_track(track)
         ordered_midpoint = geom.order_midpoints(unordered_midpoint)
-        spline = geom.smooth_midline_with_spline(ordered_midpoint)
 
-        if len(spline) <= 1:
+        car_pos = [
+            node_state.last_transform_to_world.transform.translation.x,
+            node_state.last_transform_to_world.transform.translation.y
+        ]
+        midpoints_with_car = geom.project_car_on_midline(ordered_midpoint, car_pos)
+
+        spline = geom.smooth_midline_with_spline(midpoints_with_car)
+
+        extended_spline = geom.extend_trajectory_linearly(
+            spline,
+            node_state.params["trajectory_extension_meters"],
+            node_state.params["spline_sampling_resolution"]
+        )
+
+        if len(extended_spline) <= 1:
             self.get_logger().warn("No points inside spline, skipping...")
             return
 
@@ -447,11 +460,11 @@ class CameraTraj(Node):
         MAX_SPEED = 5.0
         MIN_SPEED = 3.0
 
-        k_array = [0.0] * len(spline)
-        v_array = [0.0] * len(spline)
+        k_array = [0.0] * len(extended_spline)
+        v_array = [0.0] * len(extended_spline)
 
-        for i in range(1, len(spline) - 1):
-            k = geom.get_curvature(spline[i-1], spline[i], spline[i+1])
+        for i in range(1, len(extended_spline) - 1):
+            k = geom.get_curvature(extended_spline[i-1], extended_spline[i], extended_spline[i+1])
             k_array[i] = k
             abs_k = abs(k)
             v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
@@ -461,7 +474,7 @@ class CameraTraj(Node):
         k_array[-1] = k_array[-2]
         v_array[-1] = v_array[-2]
 
-        for i, p in enumerate(spline):
+        for i, p in enumerate(extended_spline):
             pt = Point()
             pt.x, pt.y, pt.z = float(p[0]), float(p[1]), 0.0
             traj_msg.trajectory.append(pt)

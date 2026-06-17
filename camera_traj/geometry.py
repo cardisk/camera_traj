@@ -114,8 +114,8 @@ def find_unordered_midpoints_inside_track(track: Track) -> list:
 
     # Appending the car position.
     # Pure Pursuit controller prefers a trajectory near the car
-    midpoints.append([node_state.last_transform_to_world.transform.translation.x,
-                        node_state.last_transform_to_world.transform.translation.y])
+    # midpoints.append([node_state.last_transform_to_world.transform.translation.x,
+    #                     node_state.last_transform_to_world.transform.translation.y])
 
     for simplex in triangulation.simplices:
         edges = [(simplex[0], simplex[1]), (simplex[1], simplex[2]), (simplex[2], simplex[0])]
@@ -145,10 +145,17 @@ def order_midpoints(midpoints: list, min_distance_between_midpoints: float = 0.5
     if len(midpoints) == 0:
         return []
 
-    # Find the starting point of the trajectory (min local X)
-    start_point: tuple = ()
-    min_local_x = float('inf')
+    filtered_midpoints = []
+    start_point = None
+    min_dist_to_car = float('inf')
 
+    # Get car position in world coordinates to initialize our direction vector
+    car_pos_world = np.array([
+        node_state.last_transform_to_world.transform.translation.x,
+        node_state.last_transform_to_world.transform.translation.y
+    ])
+
+    # Filter out points behind the car and find the best starting point
     for p in midpoints:
         p_world = PointStamped()
         p_world.header.frame_id = node_state.params["world_frame"]
@@ -158,25 +165,150 @@ def order_midpoints(midpoints: list, min_distance_between_midpoints: float = 0.5
 
         p_local = do_transform_point(p_world, node_state.last_transform_to_car)
 
-        if p_local.point.x < min_local_x:
-            min_local_x = p_local.point.x
-            start_point = p
+        # Discard points behind the car.
+        # Using a -0.5m buffer to keep points perfectly aligned with the front axle
+        #
+        # TODO: make this a parameter!!!
+        if p_local.point.x > -0.5:
+            filtered_midpoints.append(p)
 
-    # Spatial ordering (Nearest Neighbour)
-    current_pos: tuple = start_point
-    ordered_points: list = [current_pos]
-    unvisited = [p for p in midpoints if not np.array_equal(p, current_pos)]
+            # The start point is the closest valid midpoint to the car
+            dist_to_car = math.hypot(p_local.point.x, p_local.point.y)
+            if dist_to_car < min_dist_to_car:
+                min_dist_to_car = dist_to_car
+                start_point = p
+
+    if start_point is None:
+        return []
+
+    # Spatial ordering (Nearest Neighbour with directional penalty)
+    current_pos = np.array(start_point)
+    ordered_points = [current_pos.tolist()]
+
+    # Initial direction vector looking from the car to the starting point
+    current_dir = current_pos - car_pos_world
+    norm_dir = np.linalg.norm(current_dir)
+    if norm_dir > 1e-4:
+        current_dir = current_dir / norm_dir
+    else:
+        current_dir = np.array([1.0, 0.0]) # Fallback looking forward
+
+    # Remove the start point from the unvisited list
+    unvisited = [np.array(p) for p in filtered_midpoints if not np.array_equal(p, start_point)]
 
     while unvisited:
-        distances = [math.hypot(p[0] - current_pos[0], p[1] - current_pos[1]) for p in unvisited]
-        closest_idx = np.argmin(distances)
-        closest_point = unvisited.pop(closest_idx)
+        best_idx = -1
+        best_score = float('inf')
 
-        if math.hypot(closest_point[0] - current_pos[0], closest_point[1] - current_pos[1]) > min_distance_between_midpoints:
-            ordered_points.append(closest_point)
+        for i, p in enumerate(unvisited):
+            diff = p - current_pos
+            dist = np.linalg.norm(diff)
+
+            if dist == 0:
+                continue
+
+            direction_to_p = diff / dist
+
+            # Directional penalty using dot product
+            # 1.0 = perfectly straight, 0.0 = 90 degrees turn, -1.0 = opposite direction
+            dot_prod = np.dot(current_dir, direction_to_p)
+
+            # Base score is purely the distance
+            score = dist
+
+            # Heavy penalty for sharp turns (> 90 degrees) to prevent backward loops
+            if dot_prod < 0.0:
+                score += 1000.0
+
+            if score < best_score:
+                best_score = score
+                best_idx = i
+
+        if best_idx == -1:
+            break
+
+        closest_point = unvisited.pop(best_idx)
+
+        # Accept the point only if it respects the minimum required distance
+        if np.linalg.norm(closest_point - current_pos) > min_distance_between_midpoints:
+            ordered_points.append(closest_point.tolist())
+
+            # Update current direction using a fast Exponential Moving Average (EMA)
+            # This smooths out the directional tracking along the path
+            new_dir = closest_point - current_pos
+            new_dir = new_dir / np.linalg.norm(new_dir)
+
+            current_dir = (0.5 * current_dir) + (0.5 * new_dir)
+            current_dir = current_dir / np.linalg.norm(current_dir)
+
             current_pos = closest_point
 
-    return np.array(ordered_points)
+    return ordered_points
+
+
+def project_car_on_midline(ordered_midpoints: list, car_pos: list) -> list:
+    if len(ordered_midpoints) < 2:
+        return ordered_midpoints
+
+    pts = np.array(ordered_midpoints)
+    p_car = np.array(car_pos)
+
+    best_dist = float('inf')
+    best_projection = None
+    best_index = 0
+
+    # Find the nearest segment to the car
+    for i in range(len(pts) - 1):
+        p1 = pts[i]
+        p2 = pts[i + 1]
+
+        v = p2 - p1
+        w = p_car - p1
+
+        v_norm_sq = np.dot(v, v)
+        if v_norm_sq == 0.0:
+            continue
+
+        # Calculate the projection limited to the segment [0, 1]
+        t = np.clip(np.dot(w, v) / v_norm_sq, 0.0, 1.0)
+        projection = p1 + t * v
+
+        dist = np.linalg.norm(p_car - projection)
+        if dist < best_dist:
+            best_dist = dist
+            best_projection = projection
+            best_index = i
+
+    if best_projection is None:
+        return ordered_midpoints
+
+    new_midpoints = [best_projection.tolist()] + pts[best_index + 1:].tolist()
+
+    return new_midpoints
+
+
+def extend_trajectory_linearly(spline_points: list, extension_meters: float, step_size: float) -> list:
+    if len(spline_points) < 2 or extension_meters <= 0.0:
+        return spline_points
+
+    p_last = np.array(spline_points[-1])
+    p_prev = np.array(spline_points[-2])
+
+    direction = p_last - p_prev
+    norm = np.linalg.norm(direction)
+
+    if norm == 0.0:
+        return spline_points
+
+    unit_direction = direction / norm
+    num_extra_points = int(extension_meters / step_size)
+
+    extended_points = list(spline_points)
+    for i in range(1, num_extra_points + 1):
+        new_point = p_last + unit_direction * (i * step_size)
+        extended_points.append(new_point.tolist())
+
+    return extended_points
 
 
 def smooth_midline_with_spline(midpoints: list) -> list:
