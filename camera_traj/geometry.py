@@ -216,9 +216,10 @@ def order_midpoints(midpoints: list, min_distance_between_midpoints: float = 0.5
             # Base score is purely the distance
             score = dist
 
-            # Heavy penalty for sharp turns (> 90 degrees) to prevent backward loops
-            if dot_prod < 0.0:
-                score += 1000.0
+            # STRICT REJECTION: Prevent backward loops
+            # If the point is more than 90 degrees backward, discard it entirely
+            if dot_prod < -0.1:
+                continue
 
             if score < best_score:
                 best_score = score
@@ -269,8 +270,9 @@ def project_car_on_midline(ordered_midpoints: list, car_pos: list) -> list:
         if v_norm_sq == 0.0:
             continue
 
-        # Calculate the projection limited to the segment [0, 1]
-        t = np.clip(np.dot(w, v) / v_norm_sq, 0.0, 1.0)
+        # Calculate the projection limited to the segment
+        # Changed from 0.0 to -3.0 to allow projecting backwards if the car is behind the first points
+        t = np.clip(np.dot(w, v) / v_norm_sq, -3.0, 1.0)
         projection = p1 + t * v
 
         dist = np.linalg.norm(p_car - projection)

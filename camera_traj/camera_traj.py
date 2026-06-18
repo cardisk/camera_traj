@@ -436,6 +436,14 @@ class CameraTraj(Node):
             node_state.last_transform_to_world.transform.translation.x,
             node_state.last_transform_to_world.transform.translation.y
         ]
+
+        # Fallback starting point: if the first point is too far (> 2.5m), prepend the car
+        if len(ordered_midpoint) > 0:
+            first_point = np.array(ordered_midpoint[0])
+            dist_to_first = np.linalg.norm(first_point - np.array(car_pos))
+            if dist_to_first > 2.5:
+                ordered_midpoint.insert(0, car_pos)
+
         midpoints_with_car = geom.project_car_on_midline(ordered_midpoint, car_pos)
 
         extended_midpoints = geom.extend_trajectory_linearly(
