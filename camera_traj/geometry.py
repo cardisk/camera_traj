@@ -287,23 +287,23 @@ def project_car_on_midline(ordered_midpoints: list, car_pos: list) -> list:
     return new_midpoints
 
 
-def extend_trajectory_linearly(spline_points: list, extension_meters: float, step_size: float) -> list:
-    if len(spline_points) < 2 or extension_meters <= 0.0:
-        return spline_points
+def extend_trajectory_linearly(points: list, extension_meters: float, step_size: float) -> list:
+    if len(points) < 2 or extension_meters <= 0.0:
+        return points
 
-    p_last = np.array(spline_points[-1])
-    p_prev = np.array(spline_points[-2])
+    p_last = np.array(points[-1])
+    p_prev = np.array(points[-2])
 
     direction = p_last - p_prev
     norm = np.linalg.norm(direction)
 
     if norm == 0.0:
-        return spline_points
+        return points
 
     unit_direction = direction / norm
     num_extra_points = int(extension_meters / step_size)
 
-    extended_points = list(spline_points)
+    extended_points = list(points)
     for i in range(1, num_extra_points + 1):
         new_point = p_last + unit_direction * (i * step_size)
         extended_points.append(new_point.tolist())

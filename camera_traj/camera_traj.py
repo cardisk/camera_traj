@@ -438,13 +438,13 @@ class CameraTraj(Node):
         ]
         midpoints_with_car = geom.project_car_on_midline(ordered_midpoint, car_pos)
 
-        spline = geom.smooth_midline_with_spline(midpoints_with_car)
-
-        extended_spline = geom.extend_trajectory_linearly(
-            spline,
+        extended_midpoints = geom.extend_trajectory_linearly(
+            midpoints_with_car,
             node_state.params["trajectory_extension_meters"],
             node_state.params["spline_sampling_resolution"]
         )
+
+        extended_spline = geom.smooth_midline_with_spline(extended_midpoints)
 
         if len(extended_spline) <= 1:
             self.get_logger().warn("No points inside spline, skipping...")
