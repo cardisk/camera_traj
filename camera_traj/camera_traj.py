@@ -11,13 +11,14 @@ from rclpy.qos import qos_profile_sensor_data
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
-from std_msgs.msg import ColorRGBA
+from std_msgs.msg import ColorRGBA, Bool
 from geometry_msgs.msg import Point, PointStamped
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker, MarkerArray
 from driverless_msgs.msg import BoundingBoxes, Trajectory
 
 from tf2_ros import Buffer, TransformListener
+from tf2_geometry_msgs import do_transform_point
 
 from .state import node_state
 from .rolling_map import MapPoint, RollingMap
@@ -80,6 +81,18 @@ class CameraTraj(Node):
 
         self.car_frame   = self.p["car_frame"]
         self.world_frame = self.p["world_frame"]
+
+        self.target_laps = self.p["target_laps"] + 1
+        self.lap_cooldown_sec = self.p["lap_cooldown_sec"]
+        self.lap_lateral_bound = self.p["lap_lateral_bound"]
+        self.mission_finish_topic = self.p.get("mission_finish_topic", "/system/mission_finish")
+
+        self.lap_counter = 0
+        self.last_lap_time = self.get_clock().now()
+        self.mission_finished = False
+
+        # Publisher
+        self.mission_finish_pub = self.create_publisher(Bool, self.mission_finish_topic, 10)
 
         # Topics
         self.depth_topic             = self.p["depth_topic"]
@@ -316,6 +329,38 @@ class CameraTraj(Node):
                 rclpy.duration.Duration(seconds=0.2)
             )
 
+            if not self.mission_finished:
+                current_time = self.get_clock().now()
+
+                for cone in self.rolling_map.cone_map:
+                    if cone.color == "large_orange_cone" and not getattr(cone, 'counted_for_lap', False):
+
+                        # Point into car frame to see local X
+                        p_odom = PointStamped()
+                        p_odom.header.frame_id = self.world_frame
+                        p_odom.point.x = cone.x
+                        p_odom.point.y = cone.y
+
+                        p_car = do_transform_point(p_odom, transform_to_car)
+
+                        # X < 0m && |Y| < 4.0m
+                        if p_car.point.x < 0.0 and abs(p_car.point.y) < self.lap_lateral_bound:
+
+                            # Temporal cooldown
+                            # TODO: per acceleration questo è un problema
+                            if (current_time - self.last_lap_time).nanoseconds > (self.lap_cooldown_sec * 1e9):
+                                self.lap_counter += 1
+                                self.last_lap_time = current_time
+                                self.get_logger().info(f"LAP COMPLETED! Current lap: {self.lap_counter}")
+
+                                if self.lap_counter >= self.target_laps:
+                                    msg = Bool()
+                                    msg.data = True
+                                    self.mission_finish_pub.publish(msg)
+                                    self.mission_finished = True
+
+                            cone.counted_for_lap = True
+
             # Cleaning the map
             self.rolling_map.apply_decay(transform_to_car)
             self.rolling_map.cull_map(transform_to_car, self.world_frame)
@@ -325,15 +370,6 @@ class CameraTraj(Node):
 
             if self.debug_output:
                 self.publish_active_map_as_marker_array()
-
-            # midpoints = self.calculate_centerline(self.rmhcth, transform_to_car)
-            # midpoints_len = len(midpoints)
-
-            # if midpoints_len > 0:
-            #     self.publish_trajectory(midpoints, transform_to_car)
-
-            # else:
-            #     self.get_logger().warn("Could not calculate a new trajectory, no midpoints found inside the map")
 
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")

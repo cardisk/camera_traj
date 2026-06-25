@@ -29,6 +29,7 @@ class MapPoint:
     hit_count: int = 1
     miss_count: int = 0
     seen_in_current_step : bool = False
+    counted_for_lap: bool = False
 
 
 class RollingMap:

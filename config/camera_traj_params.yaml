@@ -12,11 +12,16 @@ camera_traj:
     rolling_map_debug_topic: "/camera_traj/debug/rolling_map"
     trajectory_debug_topic: "/camera_traj/debug/trajectory"
     output_topic: "/camera_traj/output"
+    mission_finish_topic: "/trajectory/mission_finish"
 
     # Settings
     node_output_frequecy_hz: 15
     depth_extraction_algorithm: "bimodal"
     trajectory_extension_meters: 5.0
+
+    target_laps: 1
+    lap_cooldown_sec: 20.0
+    lap_lateral_bound: 4.0
 
     rolling_map_safety_threshold: 2.0
     rolling_map_ema_filter_alpha: 0.4
