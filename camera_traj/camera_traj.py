@@ -15,7 +15,7 @@ from std_msgs.msg import ColorRGBA, Bool
 from geometry_msgs.msg import Point, PointStamped
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker, MarkerArray
-from driverless_msgs.msg import BoundingBoxes, Trajectory
+from driverless_msgs.msg import Mission, BoundingBoxes, Trajectory, Frame
 
 from tf2_ros import Buffer, TransformListener
 from tf2_geometry_msgs import do_transform_point
@@ -42,6 +42,11 @@ class CameraTraj(Node):
         # Class fields
         self.bridge = CvBridge()
         self.camera_info = None
+
+        self.lap_counter = 0
+        self.last_lap_time = self.get_clock().now()
+        self.mission_finished = False
+        self.mission = None
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -85,14 +90,15 @@ class CameraTraj(Node):
         self.target_laps = self.p["target_laps"] + 1
         self.lap_cooldown_sec = self.p["lap_cooldown_sec"]
         self.lap_lateral_bound = self.p["lap_lateral_bound"]
-        self.mission_finish_topic = self.p.get("mission_finish_topic", "/system/mission_finish")
+        self.mission_selected_topic = self.p["mission_selected_topic"]
+        self.mission_finish_topic = self.p["mission_finish_topic"]
 
-        self.lap_counter = 0
-        self.last_lap_time = self.get_clock().now()
-        self.mission_finished = False
+        self.mission_sub = self.create_subscription(
+            Mission, self.mission_selected_topic, self.get_mission_selected, 10
+        )
 
         # Publisher
-        self.mission_finish_pub = self.create_publisher(Bool, self.mission_finish_topic, 10)
+        self.mission_finish_pub = self.create_publisher(Frame, self.mission_finish_topic, 10)
 
         # Topics
         self.depth_topic             = self.p["depth_topic"]
@@ -174,7 +180,7 @@ class CameraTraj(Node):
         self.depth_sub = Subscriber(self, Image, self.depth_topic, qos_profile=qos_profile_sensor_data)
         self.yolo_sub = Subscriber(self, BoundingBoxes, self.yolo_topic, qos_profile=qos_profile_sensor_data)
 
-        queue_size = 50
+        queue_size = 200
         max_difference_in_seconds = 0.2
 
         self.sync = ApproximateTimeSynchronizer(
@@ -201,6 +207,9 @@ class CameraTraj(Node):
 
         self.get_logger().info("")
         self.get_logger().info("Ready!")
+
+    def get_mission_selected(self, mission_msg):
+        pass
 
     def get_camera_info(self, camera_info_msg):
         if self.camera_info is None:
@@ -333,7 +342,7 @@ class CameraTraj(Node):
                 current_time = self.get_clock().now()
 
                 for cone in self.rolling_map.cone_map:
-                    if cone.color == "large_orange_cone" and not getattr(cone, 'counted_for_lap', False):
+                    if cone.color == "large_orange_cone" and not cone.counted_for_lap:
 
                         # Point into car frame to see local X
                         p_odom = PointStamped()
@@ -343,15 +352,14 @@ class CameraTraj(Node):
 
                         p_car = do_transform_point(p_odom, transform_to_car)
 
-                        # X < 0m && |Y| < 4.0m
-                        if p_car.point.x < 0.0 and abs(p_car.point.y) < self.lap_lateral_bound:
+                        if p_car.point.x < self.p["cull_distance_behind"] and abs(p_car.point.y) < self.lap_lateral_bound:
 
                             # Temporal cooldown
-                            # TODO: per acceleration questo è un problema
                             if (current_time - self.last_lap_time).nanoseconds > (self.lap_cooldown_sec * 1e9):
                                 self.lap_counter += 1
                                 self.last_lap_time = current_time
-                                self.get_logger().info(f"LAP COMPLETED! Current lap: {self.lap_counter}")
+
+                                # TODO: send lap counter here
 
                                 if self.lap_counter >= self.target_laps:
                                     msg = Bool()

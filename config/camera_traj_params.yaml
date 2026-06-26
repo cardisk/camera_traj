@@ -12,16 +12,24 @@ camera_traj:
     rolling_map_debug_topic: "/camera_traj/debug/rolling_map"
     trajectory_debug_topic: "/camera_traj/debug/trajectory"
     output_topic: "/camera_traj/output"
-    mission_finish_topic: "/trajectory/mission_finish"
+
+    mission_selected_topic: "/master/mission"
+    mission_finish_topic: "/can_handler/to_can"
 
     # Settings
     node_output_frequecy_hz: 15
     depth_extraction_algorithm: "bimodal"
     trajectory_extension_meters: 5.0
 
+    # DO NOT TOUCH, OVERWRITTEN BASED ON MISSION #
     target_laps: 1
     lap_cooldown_sec: 20.0
     lap_lateral_bound: 4.0
+
+    max_lateral_acceleration: 5.0 # m/s
+    max_speed: 5.0                # m/s
+    min_speed: 4.0                # m/s
+    # ############################################
 
     rolling_map_safety_threshold: 2.0
     rolling_map_ema_filter_alpha: 0.4
@@ -40,3 +48,32 @@ camera_traj:
 
     world_frame: "map"
     car_frame: "zed_camera_link"
+
+    # Missions
+    ebs_test:
+      target_laps: 1
+      lap_cooldown_sec: 4.0
+      max_lateral_acceleration: 5.0
+      max_speed: 15.0
+      min_speed: 5.0
+
+    acceleration:
+      target_laps: 1
+      lap_cooldown_sec: 4.0
+      max_lateral_acceleration: 5.0
+      max_speed: 15.0
+      min_speed: 5.0
+
+    autocross:
+      target_laps: 1
+      lap_cooldown_sec: 10.0
+      max_lateral_acceleration: 5.0
+      max_speed: 10.0
+      min_speed: 6.0
+
+    trackdrive:
+      target_laps: 10
+      lap_cooldown_sec: 10.0
+      max_lateral_acceleration: 5.0
+      max_speed: 10.0
+      min_speed: 4.0
