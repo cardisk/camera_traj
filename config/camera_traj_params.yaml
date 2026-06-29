@@ -21,6 +21,8 @@ camera_traj:
     depth_extraction_algorithm: "bimodal"
     trajectory_extension_meters: 5.0
 
+    mission_finished_shutdown_cmd_delay_sec: 2.0
+
     # DO NOT TOUCH, OVERWRITTEN BASED ON MISSION #
     target_laps: 1
     lap_cooldown_sec: 20.0

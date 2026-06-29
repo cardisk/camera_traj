@@ -10,15 +10,27 @@ from launch_ros.actions import Node
 def get_command_overrides(yaml_file_path):
     """
     Dynamically extracting the parameters overrides passed
-    through the command line
+    through the command line, including nested dictionary structures.
     """
     valid_keys = set()
+
+    def flatten_dict(d, parent_key='', sep='.'):
+        items = []
+        for k, v in d.items():
+            new_key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                items.extend(flatten_dict(v, new_key, sep=sep).items())
+            else:
+                items.append((new_key, v))
+        return dict(items)
 
     try:
         with open(yaml_file_path, 'r') as f:
             config = yaml.safe_load(f)
             node_params = config.get('camera_traj', {}).get('ros__parameters', {})
-            valid_keys = set(node_params.keys())
+
+            flat_params = flatten_dict(node_params)
+            valid_keys = set(flat_params.keys())
     except Exception as e:
         print(f"\n[ERROR] Could not read YAML file: {e}\n")
         return {}
@@ -42,10 +54,8 @@ def get_command_overrides(yaml_file_path):
                 try:
                     if '.' in val:
                         overrides[key] = float(val)
-
                     else:
                         overrides[key] = int(val)
-
                 except ValueError:
                     overrides[key] = val
 

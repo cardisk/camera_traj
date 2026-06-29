@@ -24,6 +24,7 @@ from .state import node_state
 from .rolling_map import MapPoint, RollingMap
 from . import perception as prc
 from . import geometry as geom
+from . import missions as miss
 
 
 class CameraTraj(Node):
@@ -47,6 +48,9 @@ class CameraTraj(Node):
         self.last_lap_time = self.get_clock().now()
         self.mission_finished = False
         self.mission = None
+        self.max_lateral_acceleration = 0
+        self.max_speed = 0
+        self.min_speed = 0
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -209,7 +213,44 @@ class CameraTraj(Node):
         self.get_logger().info("Ready!")
 
     def get_mission_selected(self, mission_msg):
-        pass
+        if self.mission is not None:
+            return
+
+        self.mission = miss.get_mission_from_msg(mission_msg.id)
+
+        match self.mission:
+            case miss.Mission.EBSTest:
+                self.get_logger().info("Mission: EBS Test")
+                self.target_laps = self.p["ebs_test.target_laps"] + 1
+                self.lap_cooldown_sec = self.p["ebs_test.lap_cooldown_sec"]
+                self.max_lateral_acceleration = self.p["ebs_test.max_lateral_acceleration"]
+                self.max_speed = self.p["ebs_test.max_speed"]
+                self.min_speed = self.p["ebs_test.min_speed"]
+
+            case miss.Mission.Acceleration:
+                self.get_logger().info("Mission: Acceleration")
+                self.target_laps = self.p["acceleration.target_laps"] + 1
+                self.lap_cooldown_sec = self.p["acceleration.lap_cooldown_sec"]
+                self.max_lateral_acceleration = self.p["acceleration.max_lateral_acceleration"]
+                self.max_speed = self.p["acceleration.max_speed"]
+                self.min_speed = self.p["acceleration.min_speed"]
+
+            case miss.Mission.Autocross:
+                self.get_logger().info("Mission: Autocross")
+                self.target_laps = self.p["autocross.target_laps"] + 1
+                self.lap_cooldown_sec = self.p["autocross.lap_cooldown_sec"]
+                self.max_lateral_acceleration = self.p["autocross.max_lateral_acceleration"]
+                self.max_speed = self.p["autocross.max_speed"]
+                self.min_speed = self.p["autocross.min_speed"]
+
+            case miss.Mission.Trackdrive:
+                self.get_logger().info("Mission: Trackdrive")
+                self.target_laps = self.p["trackdrive.target_laps"] + 1
+                self.lap_cooldown_sec = self.p["trackdrive.lap_cooldown_sec"]
+                self.max_lateral_acceleration = self.p["trackdrive.max_lateral_acceleration"]
+                self.max_speed = self.p["trackdrive.max_speed"]
+                self.min_speed = self.p["trackdrive.min_speed"]
+
 
     def get_camera_info(self, camera_info_msg):
         if self.camera_info is None:
@@ -362,9 +403,6 @@ class CameraTraj(Node):
                                 # TODO: send lap counter here
 
                                 if self.lap_counter >= self.target_laps:
-                                    msg = Bool()
-                                    msg.data = True
-                                    self.mission_finish_pub.publish(msg)
                                     self.mission_finished = True
 
                             cone.counted_for_lap = True
@@ -448,6 +486,15 @@ class CameraTraj(Node):
 
 
     def publish_trajectory(self):
+        current_time = self.get_clock().now()
+
+        if self.mission_finished and (current_time - self.last_lap_time).nanoseconds > (node_state.params["mission_finished_shutdown_cmd_delay_sec"] * 1e9):
+            finish_msg = Frame()
+            finish_msg.id = 351
+            finish_msg.dlc = 1
+            finish_msg.data = [2, 0, 0, 0, 0, 0, 0, 0]
+            self.mission_finish_pub.publish(finish_msg)
+
         try:
             node_state.last_transform_to_car = self.tf_buffer.lookup_transform(
                 self.car_frame,
@@ -507,10 +554,9 @@ class CameraTraj(Node):
         traj_msg.header.frame_id = self.world_frame
         traj_msg.header.stamp = self.get_clock().now().to_msg()
 
-        # TODO: make these as parameters!!!
-        MAX_LAT_ACCEL = 5.0
-        MAX_SPEED = 5.0
-        MIN_SPEED = 3.0
+        MAX_LAT_ACCEL = self.max_lateral_acceleration
+        MAX_SPEED = self.max_speed
+        MIN_SPEED = self.min_speed
 
         k_array = [0.0] * len(extended_spline)
         v_array = [0.0] * len(extended_spline)
@@ -519,7 +565,11 @@ class CameraTraj(Node):
             k = geom.get_curvature(extended_spline[i-1], extended_spline[i], extended_spline[i+1])
             k_array[i] = k
             abs_k = abs(k)
-            v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
+
+            if self.mission_finished:
+                v_array[i] = 0
+            else:
+                v_array[i] = max(MIN_SPEED, min(MAX_SPEED, math.sqrt(MAX_LAT_ACCEL / abs_k) if abs_k >= 1e-4 else MAX_SPEED))
 
         k_array[0] = k_array[1]
         v_array[0] = v_array[1]

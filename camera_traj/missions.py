@@ -10,11 +10,12 @@ class Mission(IntEnum):
     Inspection   = 5
     Autocross    = 6
 
+
 @dataclass
 class MissionConfig:
     lap_target: int
     lap_cooldown_time_sec: float
 
 
-def get_config_for_mission(mission: Mission):
-    pass
+def get_mission_from_msg(miss: int):
+    return Mission(miss)
