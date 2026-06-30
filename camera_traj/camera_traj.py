@@ -217,6 +217,7 @@ class CameraTraj(Node):
             return
 
         self.mission = miss.get_mission_from_msg(mission_msg.id)
+        node_state.mission = self.mission
 
         match self.mission:
             case miss.Mission.EBSTest:
@@ -393,7 +394,7 @@ class CameraTraj(Node):
 
                         p_car = do_transform_point(p_odom, transform_to_car)
 
-                        if p_car.point.x < self.p["cull_distance_behind"] and abs(p_car.point.y) < self.lap_lateral_bound:
+                        if p_car.point.x < self.p["mission_finished_lookback_meters"] and abs(p_car.point.y) < self.lap_lateral_bound:
 
                             # Temporal cooldown
                             if (current_time - self.last_lap_time).nanoseconds > (self.lap_cooldown_sec * 1e9):

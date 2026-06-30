@@ -12,6 +12,7 @@ from geometry_msgs.msg import PointStamped
 
 from .rolling_map import RollingMap
 from .state import node_state
+from .missions import Mission
 
 
 @dataclass
@@ -65,7 +66,22 @@ def find_track_inside_map(rolling_map: RollingMap) -> Track:
                 track.right_cones.append(Point2D(cone.x, cone.y))
 
             case "orange_cone":
-                track.orange_cones.append(Point2D(cone.x, cone.y))
+                if (node_state.mission == Mission.Acceleration):
+                    p_world = PointStamped()
+                    # Here there is no need to use the complete header to do the transformation
+                    p_world.header.frame_id = node_state.params["world_frame"]
+                    p_world.point.x = cone.x
+                    p_world.point.y = cone.y
+                    p_world.point.z = 0.0
+
+                    p_car = do_transform_point(p_world, node_state.last_transform_to_car)
+
+                    if p_car.point.y > 0:
+                        track.left_cones.append(Point2D(cone.x, cone.y))
+                    elif p_car.point.y < 0:
+                        track.right_cones.append(Point2D(cone.x, cone.y))
+                else:
+                    track.orange_cones.append(Point2D(cone.x, cone.y))
 
             case "large_orange_cone":
                 track.large_orange_cones.append(Point2D(cone.x, cone.y))

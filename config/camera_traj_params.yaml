@@ -21,7 +21,8 @@ camera_traj:
     depth_extraction_algorithm: "bimodal"
     trajectory_extension_meters: 5.0
 
-    mission_finished_shutdown_cmd_delay_sec: 2.0
+    mission_finished_shutdown_cmd_delay_sec: 1.0
+    mission_finished_lookback_meters: 0.0
 
     # DO NOT TOUCH, OVERWRITTEN BASED ON MISSION #
     target_laps: 1
@@ -54,23 +55,23 @@ camera_traj:
     # Missions
     ebs_test:
       target_laps: 1
-      lap_cooldown_sec: 4.0
+      lap_cooldown_sec: 2.0
       max_lateral_acceleration: 5.0
-      max_speed: 15.0
-      min_speed: 5.0
+      max_speed: 13.0
+      min_speed: 8.0
 
     acceleration:
       target_laps: 1
-      lap_cooldown_sec: 4.0
+      lap_cooldown_sec: 2.0
       max_lateral_acceleration: 5.0
-      max_speed: 15.0
-      min_speed: 5.0
+      max_speed: 13.0
+      min_speed: 8.0
 
     autocross:
       target_laps: 1
       lap_cooldown_sec: 10.0
       max_lateral_acceleration: 5.0
-      max_speed: 10.0
+      max_speed: 7.0
       min_speed: 6.0
 
     trackdrive:
