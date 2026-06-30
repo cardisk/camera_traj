@@ -48,9 +48,12 @@ class CameraTraj(Node):
         self.last_lap_time = self.get_clock().now()
         self.mission_finished = False
         self.mission = None
+
+        # DEFAULTS, NOT PRESENT IN CONFIG FOR CAR SAFETY REASONS #
         self.max_lateral_acceleration = 0
         self.max_speed = 0
         self.min_speed = 0
+        # ########################################################
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -91,11 +94,11 @@ class CameraTraj(Node):
         self.car_frame   = self.p["car_frame"]
         self.world_frame = self.p["world_frame"]
 
-        self.target_laps = self.p["target_laps"] + 1
-        self.lap_cooldown_sec = self.p["lap_cooldown_sec"]
-        self.lap_lateral_bound = self.p["lap_lateral_bound"]
+        self.target_laps            = self.p["target_laps"] + 1
+        self.lap_cooldown_sec       = self.p["lap_cooldown_sec"]
+        self.lap_lateral_bound      = self.p["lap_lateral_bound"]
         self.mission_selected_topic = self.p["mission_selected_topic"]
-        self.mission_finish_topic = self.p["mission_finish_topic"]
+        self.mission_finish_topic   = self.p["mission_finish_topic"]
 
         self.mission_sub = self.create_subscription(
             Mission, self.mission_selected_topic, self.get_mission_selected, 10
@@ -222,35 +225,35 @@ class CameraTraj(Node):
         match self.mission:
             case miss.Mission.EBSTest:
                 self.get_logger().info("Mission: EBS Test")
-                self.target_laps = self.p["ebs_test.target_laps"] + 1
-                self.lap_cooldown_sec = self.p["ebs_test.lap_cooldown_sec"]
+                self.target_laps              = self.p["ebs_test.target_laps"] + 1
+                self.lap_cooldown_sec         = self.p["ebs_test.lap_cooldown_sec"]
                 self.max_lateral_acceleration = self.p["ebs_test.max_lateral_acceleration"]
-                self.max_speed = self.p["ebs_test.max_speed"]
-                self.min_speed = self.p["ebs_test.min_speed"]
+                self.max_speed                = self.p["ebs_test.max_speed"]
+                self.min_speed                = self.p["ebs_test.min_speed"]
 
             case miss.Mission.Acceleration:
                 self.get_logger().info("Mission: Acceleration")
-                self.target_laps = self.p["acceleration.target_laps"] + 1
-                self.lap_cooldown_sec = self.p["acceleration.lap_cooldown_sec"]
+                self.target_laps              = self.p["acceleration.target_laps"] + 1
+                self.lap_cooldown_sec         = self.p["acceleration.lap_cooldown_sec"]
                 self.max_lateral_acceleration = self.p["acceleration.max_lateral_acceleration"]
-                self.max_speed = self.p["acceleration.max_speed"]
-                self.min_speed = self.p["acceleration.min_speed"]
+                self.max_speed                = self.p["acceleration.max_speed"]
+                self.min_speed                = self.p["acceleration.min_speed"]
 
             case miss.Mission.Autocross:
                 self.get_logger().info("Mission: Autocross")
-                self.target_laps = self.p["autocross.target_laps"] + 1
-                self.lap_cooldown_sec = self.p["autocross.lap_cooldown_sec"]
+                self.target_laps              = self.p["autocross.target_laps"] + 1
+                self.lap_cooldown_sec         = self.p["autocross.lap_cooldown_sec"]
                 self.max_lateral_acceleration = self.p["autocross.max_lateral_acceleration"]
-                self.max_speed = self.p["autocross.max_speed"]
-                self.min_speed = self.p["autocross.min_speed"]
+                self.max_speed                = self.p["autocross.max_speed"]
+                self.min_speed                = self.p["autocross.min_speed"]
 
             case miss.Mission.Trackdrive:
                 self.get_logger().info("Mission: Trackdrive")
-                self.target_laps = self.p["trackdrive.target_laps"] + 1
-                self.lap_cooldown_sec = self.p["trackdrive.lap_cooldown_sec"]
+                self.target_laps              = self.p["trackdrive.target_laps"] + 1
+                self.lap_cooldown_sec         = self.p["trackdrive.lap_cooldown_sec"]
                 self.max_lateral_acceleration = self.p["trackdrive.max_lateral_acceleration"]
-                self.max_speed = self.p["trackdrive.max_speed"]
-                self.min_speed = self.p["trackdrive.min_speed"]
+                self.max_speed                = self.p["trackdrive.max_speed"]
+                self.min_speed                = self.p["trackdrive.min_speed"]
 
 
     def get_camera_info(self, camera_info_msg):

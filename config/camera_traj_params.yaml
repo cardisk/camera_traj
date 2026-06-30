@@ -24,14 +24,10 @@ camera_traj:
     mission_finished_shutdown_cmd_delay_sec: 1.0
     mission_finished_lookback_meters: 0.0
 
-    # DO NOT TOUCH, OVERWRITTEN BASED ON MISSION #
+    # DEFAULTS, OVERWRITTEN BASED ON MISSION #
     target_laps: 1
-    lap_cooldown_sec: 20.0
+    lap_cooldown_sec: 5.0
     lap_lateral_bound: 4.0
-
-    max_lateral_acceleration: 5.0 # m/s
-    max_speed: 5.0                # m/s
-    min_speed: 4.0                # m/s
     # ############################################
 
     rolling_map_safety_threshold: 2.0
