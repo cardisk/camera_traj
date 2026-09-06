@@ -11,7 +11,7 @@ from rclpy.qos import qos_profile_sensor_data
 
 from message_filters import ApproximateTimeSynchronizer, Subscriber
 
-from std_msgs.msg import ColorRGBA, Bool
+from std_msgs.msg import ColorRGBA, Bool, UInt8
 from geometry_msgs.msg import Point, PointStamped
 from sensor_msgs.msg import CameraInfo, Image
 from visualization_msgs.msg import Marker, MarkerArray
@@ -212,6 +212,10 @@ class CameraTraj(Node):
             self.get_logger().warn("Use this only when running this node with a bag started with --clock flag")
             self.get_logger().warn("-------------------------------------------------------------------------")
 
+        # Datalogger lap counter & cones count
+        self.cones_count_actual_for_datalogger_pub = self.create_publisher(UInt8, "/data_logger/cones_count_actual", 10)
+        self.lap_counter_for_datalogger_pub = self.create_publisher(UInt8, "/data_logger/lap_count", 10)
+
         self.get_logger().info("")
         self.get_logger().info("Ready!")
 
@@ -404,8 +408,6 @@ class CameraTraj(Node):
                                 self.lap_counter += 1
                                 self.last_lap_time = current_time
 
-                                # TODO: send lap counter here
-
                                 if self.lap_counter >= self.target_laps:
                                     self.mission_finished = True
 
@@ -418,12 +420,23 @@ class CameraTraj(Node):
             self.get_logger().info("")
             self.get_logger().info(f"Map updated, active cones: {len(self.rolling_map.cone_map)}")
 
+            self.publish_data_for_datalogger()
+
             if self.debug_output:
                 self.publish_active_map_as_marker_array()
 
         except Exception as e:
             self.get_logger().warn(f"Culling failed. Could not get TF from {self.world_frame} to {self.car_frame}: {e}")
             return
+
+    def publish_data_for_datalogger(self):
+        cones_count_actual_msg = UInt8()
+        cones_count_actual_msg.data = len(self.rolling_map.cone_map)
+        self.cones_count_actual_for_datalogger_pub.publish(cones_count_actual_msg)
+
+        lap_counter_msg = UInt8()
+        lap_counter_msg.data = self.lap_counter
+        self.lap_counter_for_datalogger_pub.publish(lap_counter_msg)
 
     def publish_active_map_as_marker_array(self):
         marker_array = MarkerArray()
