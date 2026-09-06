@@ -6,7 +6,6 @@
 [ ] Better mission system
 
 ### Mid Priority
-[ ] Lap counter
 [ ] Track limits as path calculator
 [ ] Replace the depth map depedency of the Zed2i
 
